@@ -1877,7 +1877,7 @@ static int hub_port_wait_reset(struct usb_hub *hub, int port1,
 
 			
 			if ((portchange & USB_PORT_STAT_C_CONNECTION))
-				return -ENOTCONN;
+				return -EAGAIN;
 
 			if (!(portstatus & USB_PORT_STAT_RESET) &&
 			    (portstatus & USB_PORT_STAT_ENABLE)) {
@@ -2328,34 +2328,17 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 int usb_remote_wakeup(struct usb_device *udev)
 {
 	int	status = 0;
-	int log_enable = 0;
 	struct usb_hcd *hcd = bus_to_hcd(udev->bus);
-
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	if (!strncmp(dev_name(&udev->dev), "usb1", 4) && (get_radio_flag() & 0x1)) {
-		log_enable = 1;
-	}
-#endif
-	if ( log_enable == 1 )
-		dev_info(&udev->dev, "%s[%d] state=[%d]\n", __func__, __LINE__, udev->state);
 
 	if (udev->state == USB_STATE_SUSPENDED) {
 		
 		if (get_radio_flag() & RADIO_FLAG_USB_UPLOAD)
 			dev_info(&udev->dev, "usb %sresume\n", "wakeup-");
 		
-		if ( log_enable == 1 )
-			dev_info(&udev->dev, "%s[%d] usb_autoresume_device+\n", __func__, __LINE__);
 		status = usb_autoresume_device(udev);
-		if ( log_enable == 1 )
-			dev_info(&udev->dev, "%s[%d] usb_autoresume_device-, status=[%d]\n", __func__, __LINE__, status);
 		if (status == 0) {
 			
-			if ( log_enable == 1 )
-				dev_info(&udev->dev, "%s[%d] usb_autosuspend_device+\n", __func__, __LINE__);
 			usb_autosuspend_device(udev);
-			if ( log_enable == 1 )
-				dev_info(&udev->dev, "%s[%d] usb_autosuspend_device-\n", __func__, __LINE__);
 		}
 	} else {
 		dev_info(&udev->dev, "usb not suspended\n");

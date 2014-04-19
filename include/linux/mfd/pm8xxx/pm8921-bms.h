@@ -61,6 +61,7 @@ struct pm8921_bms_battery_data {
 	struct pc_temp_ocv_lut	*pc_temp_ocv_lut;
 	struct sf_lut		*pc_sf_lut;
 	struct sf_lut		*rbatt_sf_lut;
+	struct sf_lut		*rbatt_est_ocv_lut;
 	int			default_rbatt_mohm;
 	int			delta_rbatt_mohm;
 };
@@ -90,6 +91,8 @@ struct pm8921_bms_platform_data {
 	int				enable_fcc_learning;
 	int						level_ocv_update_stop_begin; 
 	int						level_ocv_update_stop_end; 
+	unsigned int			criteria_sw_est_ocv; 
+	unsigned int			rconn_mohm_sw_est_ocv;
 };
 
 #if defined(CONFIG_PM8921_BMS) || defined(CONFIG_PM8921_BMS_MODULE)
@@ -117,6 +120,7 @@ int pm8921_bms_dump_all(void);
 #ifdef CONFIG_HTC_BATT_8960
 int pm8921_bms_get_batt_current(int *result);
 
+int pm8921_store_hw_reset_reason(int is_hw_reset);
 int pm8921_bms_get_batt_soc(int *result);
 int pm8921_bms_get_batt_cc(int *result);
 int pm8921_bms_get_attr_text(char *buf, int size);
@@ -174,6 +178,12 @@ static inline int pm8921_bms_get_batt_current(int *result)
 {
 	return -ENXIO;
 }
+
+static inline int pm8921_store_hw_reset_reason(int is_hw_reset)
+{
+	return -ENXIO;
+}
+
 static inline int pm8921_bms_get_batt_soc(int *result)
 {
 	return -ENXIO;

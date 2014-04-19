@@ -761,8 +761,6 @@ void fake_plug(bool plug)
 
 static void mhl_status_notifier_func(bool isMHL, int charging_type)
 {
-       if(!isMHL)
-			switch_set_state(&external_common_state->sdev, 0);
 }
 #endif
 static void hdmi_msm_hpd_state_work(struct work_struct *work)
@@ -1867,7 +1865,9 @@ static int hdcp_authentication_part1(void)
 
 	if (!is_part1_done) {
 		is_part1_done = TRUE;
-
+#ifdef CONFIG_ARCH_MSM8X60
+		hr_msleep(50);
+#endif
 		atomic_set(&read_an_complete,1);
 
 		

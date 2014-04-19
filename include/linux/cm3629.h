@@ -175,11 +175,12 @@ struct cm3629_platform_data {
 	uint8_t ps_calibration_rule;
 	uint8_t ps_conf1_val;
 	uint8_t ps_conf3_val;
-	uint8_t enable_polling_ignore;
+	uint8_t dynamical_threshold;
 	uint8_t ps1_thd_no_cal;
 	uint8_t ps1_thd_with_cal;
 	uint8_t ps2_thd_no_cal;
 	uint8_t ps2_thd_with_cal;
+	uint8_t ps_th_add;
 	uint8_t ls_cmd;
 	uint8_t ps1_adc_offset;
 	uint8_t ps2_adc_offset;

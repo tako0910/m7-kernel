@@ -32,6 +32,7 @@ enum {
 	USB_FUNCTION_ACCESSORY,
 	USB_FUNCTION_MODEM_MDM, 
 	USB_FUNCTION_NCM,
+	USB_FUNCTION_PROJECTOR2,
 	USB_FUNCTION_AUTOBOT = 30,
 	USB_FUNCTION_RNDIS_IPT = 31,
 };
@@ -101,6 +102,10 @@ static struct usb_string_node usb_string_array[] = {
 	{
 		.usb_function_flag = 1 << USB_FUNCTION_MTP,
 		.name = "mtp",
+	},
+	{
+		.usb_function_flag = 1 << USB_FUNCTION_PROJECTOR2,
+		.name = "projector2",
 	},
 
 };
@@ -325,16 +330,6 @@ int android_switch_function(unsigned func)
 		return 0;
 	}
 
-#if defined(CONFIG_QSC_MODEM) && defined(CONFIG_USB_ANDROID_MDM9K_DIAG)
-	
-	if ((func & (1 << USB_FUNCTION_MODEM)) || (func & (1 << USB_FUNCTION_RMNET))) {
-		func |= 1 << USB_FUNCTION_DIAG;
-		func |= 1 << USB_FUNCTION_DIAG_MDM;
-		func |= 1 << USB_FUNCTION_MODEM;
-		func |= 1 << USB_FUNCTION_RMNET;
-	}
-#endif
-
 	usb_gadget_disconnect(dev->cdev->gadget);
 	usb_remove_config(dev->cdev, &android_config_driver);
 
@@ -403,6 +398,9 @@ int android_switch_function(unsigned func)
 			list_add_tail(&f->enabled_list, &dev->enabled_functions);
 		else if ((func & (1 << USB_FUNCTION_PROJECTOR)) &&
 				!strcmp(f->name, "projector"))
+			list_add_tail(&f->enabled_list, &dev->enabled_functions);
+		else if ((func & (1 << USB_FUNCTION_PROJECTOR2)) &&
+				!strcmp(f->name, "projector2"))
 			list_add_tail(&f->enabled_list, &dev->enabled_functions);
 #ifdef CONFIG_USB_ANDROID_MDM9K_DIAG
 		else if ((func & (1 << USB_FUNCTION_DIAG_MDM)) &&

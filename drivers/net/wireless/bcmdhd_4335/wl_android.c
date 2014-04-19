@@ -484,7 +484,7 @@ static int wl_android_scansuppress(struct net_device *net, char *command, int to
 extern s32 wl_cfg80211_scan_abort(struct net_device *ndev);
 static int wl_android_scanabort(struct net_device *net, char *command, int total_len)
 {
-
+	wldev_set_scanabort(net);
     wl_cfg80211_scan_abort(net);
     return 0;
 }
@@ -547,9 +547,9 @@ static int wl_android_get_link_speed(struct net_device *net, char *command, int 
 	return bytes_written;
 }
 
-#define TRAFFIC_SUPER_HIGH_WATER_MARK	2600*(3000/1000)
-#define TRAFFIC_HIGH_WATER_MARK			2300*(3000/1000)
-#define TRAFFIC_LOW_WATER_MARK			256*(3000/1000)
+#define TRAFFIC_SUPER_HIGH_WATER_MARK	2600
+#define TRAFFIC_HIGH_WATER_MARK			2300
+#define TRAFFIC_LOW_WATER_MARK			256
 typedef enum traffic_ind {
 	TRAFFIC_STATS_NORMAL = 0,
 	TRAFFIC_STATS_HIGH,
@@ -653,28 +653,37 @@ void wlan_unlock_multi_core(struct net_device *dev)
 	wl_cfg80211_send_priv_event(dev, "PERF_UNLOCK");
 }
 
+static unsigned long last_traffic_count_jiffies = 0;
+
 void wl_android_traffic_monitor(struct net_device *dev)
 {
 	unsigned long rx_packets_count = 0;
 	unsigned long tx_packets_count = 0;
 	unsigned long traffic_diff = 0;
+    unsigned long jiffies_diff = 0;
 
 	
 	dhd_get_txrx_stats(dev, &rx_packets_count, &tx_packets_count);
 	current_traffic_count = rx_packets_count + tx_packets_count;
 
-	if (current_traffic_count >= last_traffic_count) {
-		traffic_diff = current_traffic_count - last_traffic_count;
+	if (current_traffic_count >= last_traffic_count && (jiffies - last_traffic_count_jiffies) >= 3*HZ) {
+        jiffies_diff = jiffies - last_traffic_count_jiffies;
+        if (jiffies_diff < 7*HZ) {
+    		traffic_diff = (current_traffic_count - last_traffic_count) / jiffies_diff * HZ;
+        }
+        else {
+            traffic_diff = 0;
+        }
         switch (traffic_stats_flag) {
         case TRAFFIC_STATS_NORMAL:
 			if (traffic_diff > TRAFFIC_HIGH_WATER_MARK) {
 				traffic_stats_flag = TRAFFIC_STATS_HIGH;
 				wlan_lock_perf();
-				printf("lock cpu here, traffic-count=%ld\n", traffic_diff / 3);
+				printf("lock cpu here, traffic-count=%ld\n", traffic_diff);
                 if (traffic_diff > TRAFFIC_SUPER_HIGH_WATER_MARK) {
                     traffic_stats_flag = TRAFFIC_STATS_SUPER_HIGH;
                     wlan_lock_multi_core(dev);
-                    printf("lock 2nd cpu here, traffic-count=%ld\n", traffic_diff / 3);
+                    printf("lock 2nd cpu here, traffic-count=%ld\n", traffic_diff);
                 }
 			}
             break;
@@ -682,23 +691,23 @@ void wl_android_traffic_monitor(struct net_device *dev)
             if (traffic_diff > TRAFFIC_SUPER_HIGH_WATER_MARK) {
                 traffic_stats_flag = TRAFFIC_STATS_SUPER_HIGH;
                 wlan_lock_multi_core(dev);
-				printf("lock 2nd cpu here, traffic-count=%ld\n", traffic_diff / 3);
+				printf("lock 2nd cpu here, traffic-count=%ld\n", traffic_diff);
             }
             else if (traffic_diff < TRAFFIC_LOW_WATER_MARK) {
 				traffic_stats_flag = TRAFFIC_STATS_NORMAL;
 				wlan_unlock_perf();
-				printf("unlock cpu here, traffic-count=%ld\n", traffic_diff / 3);
+				printf("unlock cpu here, traffic-count=%ld\n", traffic_diff);
 			}
             break;
         case TRAFFIC_STATS_SUPER_HIGH:
 			if (traffic_diff < TRAFFIC_SUPER_HIGH_WATER_MARK) {
                 traffic_stats_flag = TRAFFIC_STATS_HIGH;
                 wlan_unlock_multi_core(dev);
-				printf("unlock 2nd cpu here, traffic-count=%ld\n", traffic_diff / 3);
+				printf("unlock 2nd cpu here, traffic-count=%ld\n", traffic_diff);
                 if (traffic_diff < TRAFFIC_LOW_WATER_MARK) {
                     traffic_stats_flag = TRAFFIC_STATS_NORMAL;
                     wlan_unlock_perf();
-                    printf("unlock cpu here, traffic-count=%ld\n", traffic_diff / 3);
+                    printf("unlock cpu here, traffic-count=%ld\n", traffic_diff);
                 }
             }
             break;
@@ -706,6 +715,7 @@ void wl_android_traffic_monitor(struct net_device *dev)
             break;
         }
 	}
+    last_traffic_count_jiffies = jiffies;
 	last_traffic_count = current_traffic_count;
 	
 }
@@ -829,28 +839,28 @@ static int wl_android_set_tx_tracking(struct net_device *dev, char *command, int
        	wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
 		old_tx_stat_chk_num = tx_stat_chk_num;
 	} else 
-		printf("tx_stat_chk_num duplicate, ignore!\n");
+		DHD_INFO(("tx_stat_chk_num duplicate, ignore!\n"));
 
 	if (tx_stat_chk != old_tx_stat_chk) {
 		bcm_mkiovar("tx_stat_chk", (char *)&tx_stat_chk, 4, iovbuf, sizeof(iovbuf));
 		wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
 		old_tx_stat_chk = tx_stat_chk;
 	} else 
-		printf("tx_stat_chk duplicate, ignore!\n");
+		DHD_INFO(("tx_stat_chk duplicate, ignore!\n"));
 
 	if (tx_stat_chk_ratio != old_tx_stat_chk_ratio) {
 		bcm_mkiovar("tx_stat_chk_ratio", (char *)&tx_stat_chk_ratio, 4, iovbuf, sizeof(iovbuf));
 		wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
 		old_tx_stat_chk_ratio = tx_stat_chk_ratio;
 	} else 
-		printf("tx_stat_chk_ratio duplicate, ignore!\n");
+		DHD_INFO(("tx_stat_chk_ratio duplicate, ignore!\n"));
 
 	if (tx_stat_chk_prd != old_tx_stat_chk_prd) {
 		bcm_mkiovar("tx_stat_chk_prd", (char *)&tx_stat_chk_prd, 4, iovbuf, sizeof(iovbuf));
 		wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
 		old_tx_stat_chk_prd = tx_stat_chk_prd;
 	} else 
-		printf("tx_stat_chk_prd duplicate, ignore!\n");
+		DHD_INFO(("tx_stat_chk_prd duplicate, ignore!\n"));
 
 
         return bytes_written;
@@ -1242,6 +1252,10 @@ int wl_android_black_list_match(char *mac)
 	return 0;
 }
 
+void wl_cfg80211_send_priv_event(struct net_device *dev, char *flag);
+static int assoc_count_buff = 0;
+extern int sta_event_sent;
+
 static int
 wl_android_get_assoc_sta_list(struct net_device *dev, char *buf, int len)
 {
@@ -1274,6 +1288,16 @@ wl_android_get_assoc_sta_list(struct net_device *dev, char *buf, int len)
 		maclist->count = 0;
 	} else
 		printf("get assoc count %d, len %d\n", maclist->count, len);
+
+    
+    if (!sta_event_sent && assoc_count_buff && (assoc_count_buff != maclist->count)) {
+        wl_cfg80211_send_priv_event(dev, "STA_LEAVE");
+    }
+
+    assoc_count_buff = maclist->count;
+    sta_event_sent = 0;
+    
+
 
 	memset(buf, 0x0, len);
 	memcpy(buf, mac_lst, len);
@@ -3914,6 +3938,7 @@ int wifi_set_power(int on, unsigned long msec)
 	}
 	
 	if (!on) {
+        printf("Check module_insert(%d) before Setting wifi Power off\n", module_insert);
 		if (module_insert && gInstance && gInstance->func[0] && gInstance->func[0]->card) {
 			mmc = gInstance->func[0]->card->host;
 			host = (void *)mmc->private;

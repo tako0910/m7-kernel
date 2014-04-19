@@ -31,6 +31,7 @@ static struct usb_diag_ch *qscch;
 static  struct diag_context *qscctxt;
 
 int htc_usb_enable_function(char *name, int ebl);
+static struct switch_dev sw_htc_usb_diag;
 
 #if DIAG_XPST
 struct device diag_device;
@@ -406,6 +407,7 @@ static long htc_diag_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		if (copy_from_user(&tmp_value, argp, sizeof(int)))
 			return -EFAULT;
 		DIAG_INFO("diag: enable %d\n", tmp_value);
+		switch_set_state(&sw_htc_usb_diag, !!tmp_value);
 #if defined(CONFIG_MACH_VIGOR) || defined(CONFIG_ARCH_APQ8064)
 		htc_usb_enable_function(DIAG_MDM, tmp_value);
 #endif

@@ -125,11 +125,14 @@ module_param_named(
 
 extern int board_mfg_mode(void);
 #ifdef CONFIG_APQ8064_ONLY 
-extern unsigned long acpuclk_8960_power_collapse(void);
+extern unsigned long acpuclk_krait_power_collapse(void);
+#endif
+#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
+extern int dlp_ext_buck_en(int);
 #endif
 #define CPU_FOOT_PRINT_MAGIC				0xACBDFE00
 #define CPU_FOOT_PRINT_MAGIC_SPC			0xACBDAA00
-#define CPU_FOOT_PRINT_BASE_CPU0_VIRT		(MSM_KERNEL_FOOTPRINT_BASE + 0x0)
+#define CPU_FOOT_PRINT_BASE_CPU0_VIRT		(CPU_FOOT_PRINT_BASE + 0x0)
 
 static void init_cpu_foot_print(unsigned cpu, bool notify_rpm)
 {
@@ -146,7 +149,7 @@ static void set_cpu_foot_print(unsigned cpu, unsigned state)
 }
 
 #define RESET_VECTOR_CLEAN_MAGIC		0xDCBAABCD
-#define CPU_RESET_VECTOR_CPU0_BASE	(MSM_KERNEL_FOOTPRINT_BASE + 0x28)
+#define CPU_RESET_VECTOR_CPU0_BASE	(CPU_FOOT_PRINT_BASE + 0x28)
 static void clean_reset_vector_debug_info(unsigned cpu)
 {
 	unsigned *reset_vector = (unsigned *)CPU_RESET_VECTOR_CPU0_BASE;
@@ -154,7 +157,7 @@ static void clean_reset_vector_debug_info(unsigned cpu)
 	mb();
 }
 
-#define SAVE_MSM_PM_BOOT_ENTRY_BASE		(MSM_KERNEL_FOOTPRINT_BASE + 0x20)
+#define SAVE_MSM_PM_BOOT_ENTRY_BASE		(CPU_FOOT_PRINT_BASE + 0x20)
 static void store_pm_boot_entry_addr(void)
 {
 	unsigned *addr;
@@ -163,7 +166,7 @@ static void store_pm_boot_entry_addr(void)
 	mb();
 }
 
-#define SAVE_MSM_PM_BOOT_VECTOR_BASE			(MSM_KERNEL_FOOTPRINT_BASE + 0x24)
+#define SAVE_MSM_PM_BOOT_VECTOR_BASE			(CPU_FOOT_PRINT_BASE + 0x24)
 static void store_pm_boot_vector_addr(unsigned value)
 {
 	unsigned *addr;
@@ -962,6 +965,28 @@ int free_vreg_buffer(void)
 }
 EXPORT_SYMBOL(free_vreg_buffer);
 
+static char *pmic_reg_sleep_status_info;
+
+int print_pmic_reg_buffer(struct seq_file *m)
+{
+	if (pmic_reg_sleep_status_info)
+		seq_printf(m, pmic_reg_sleep_status_info);
+	else
+		seq_printf(m, "Device haven't suspended yet!\n");
+
+	return 0;
+}
+EXPORT_SYMBOL(print_pmic_reg_buffer);
+
+int free_pmic_reg_buffer(void)
+{
+	kfree(pmic_reg_sleep_status_info);
+	pmic_reg_sleep_status_info = NULL;
+
+	return 0;
+}
+EXPORT_SYMBOL(free_pmic_reg_buffer);
+
 int msm_pm_idle_enter(enum msm_pm_sleep_mode sleep_mode)
 {
 	int64_t time;
@@ -1157,6 +1182,9 @@ static int msm_pm_enter(suspend_state_t state)
 	uint64_t xo_shutdown_time, vdd_min_time;
 	int collapsed;
 
+#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
+	dlp_ext_buck_en(0);
+#endif
 	if (MSM_PM_DEBUG_SUSPEND & msm_pm_debug_mask)
 		pr_info("%s\n", __func__);
 
@@ -1197,6 +1225,24 @@ static int msm_pm_enter(suspend_state_t state)
 		}
 		curr_len = pmic_vreg_dump(vreg_sleep_status_info, curr_len);
 	}
+
+	
+	if (MSM_PM_DEBUG_VREG & msm_pm_debug_mask) {
+		curr_len = 0;
+		if (pmic_reg_sleep_status_info) {
+			memset(pmic_reg_sleep_status_info, 0,
+				sizeof(pmic_reg_sleep_status_info));
+		} else {
+			pmic_reg_sleep_status_info = kmalloc(75000, GFP_ATOMIC);
+			if (!pmic_reg_sleep_status_info) {
+				pr_err("kmalloc memory failed in %s\n",
+					__func__);
+
+			}
+		}
+		curr_len = pmic_suspend_reg_dump(pmic_reg_sleep_status_info, curr_len);
+	}
+	
 
 	if (smp_processor_id()) {
 		__WARN();
@@ -1313,6 +1359,10 @@ static int msm_pm_enter(suspend_state_t state)
 
 
 enter_exit:
+
+#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
+	dlp_ext_buck_en(1);
+#endif
 	if (MSM_PM_DEBUG_SUSPEND & msm_pm_debug_mask)
 		pr_info("%s: return\n", __func__);
 

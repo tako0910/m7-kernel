@@ -28,6 +28,7 @@
 #include <linux/random.h>
 #include <linux/wakelock.h>
 #include <linux/pm.h>
+#include <linux/slab.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
@@ -66,7 +67,9 @@ module_param_named(removable, mmc_assume_removable, bool, 0644);
 MODULE_PARM_DESC(
 	removable,
 	"MMC/SD cards are removable and may be removed during suspend");
-
+#ifdef SD_DEBOUNCE_DEBUG
+extern int mmc_is_sd_host(struct mmc_host *mmc);
+#endif
 int mmc_schedule_card_removal_work(struct delayed_work *work,
                                     unsigned long delay)
 {
@@ -122,9 +125,7 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 {
 	struct mmc_command *cmd = mrq->cmd;
 	int err = cmd->error;
-#ifdef CONFIG_MMC_PERF_PROFILING
 	ktime_t diff;
-#endif
 
 	if (err && cmd->retries && mmc_host_is_spi(host)) {
 		if (cmd->resp[0] & R1_SPI_ILLEGAL_COMMAND)
@@ -167,8 +168,15 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 				}
 			}
 #else
-			if (host->tp_enable)
-				trace_mmc_req_end(&host->class_dev, cmd->opcode);
+			if (host->tp_enable) {
+				if (host->perf_enable) {
+					diff = ktime_sub(ktime_get(), host->rq_start);
+					trace_mmc_request_done(&host->class_dev,
+							cmd->opcode, mrq->cmd->arg,
+							mrq->data->blocks, ktime_to_ms(diff));
+				} else
+					trace_mmc_req_end(&host->class_dev, cmd->opcode);
+			}
 #endif
 			pr_debug("%s:     %d bytes transferred: %d\n",
 				mmc_hostname(host),
@@ -253,9 +261,11 @@ mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 			mrq->stop->error = 0;
 			mrq->stop->mrq = mrq;
 		}
-#ifdef CONFIG_MMC_PERF_PROFILING
 		if (host->perf_enable)
+#ifdef CONFIG_MMC_PERF_PROFILING
 			host->perf.start = ktime_get();
+#else
+			host->rq_start = ktime_get();
 #endif
 	}
 	mmc_host_clk_hold(host);
@@ -269,6 +279,7 @@ void mmc_start_bkops(struct mmc_card *card)
 	unsigned long flags;
 	int timeout;
 	int is_storage_encrypting = 0;
+	int urgent_bkops = 0;
 
 	BUG_ON(!card);
 	if (!card->ext_csd.bkops_en || !(card->host->caps2 & MMC_CAP2_BKOPS))
@@ -281,12 +292,14 @@ void mmc_start_bkops(struct mmc_card *card)
 		spin_lock_irqsave(&card->host->lock, flags);
 		mmc_card_clr_check_bkops(card);
 		spin_unlock_irqrestore(&card->host->lock, flags);
-		if (mmc_is_exception_event(card, EXT_CSD_URGENT_BKOPS) || is_storage_encrypting)
+		urgent_bkops = mmc_is_exception_event(card, EXT_CSD_URGENT_BKOPS);
+		if (urgent_bkops || card->host->bkops_check_status || is_storage_encrypting) {
 			if (card->ext_csd.raw_bkops_status >= EXT_CSD_BKOPS_LEVEL_2 || is_storage_encrypting) {
 				spin_lock_irqsave(&card->host->lock, flags);
 				mmc_card_set_need_bkops(card);
 				spin_unlock_irqrestore(&card->host->lock, flags);
 			}
+		}
 	}
 
 	if (mmc_card_doing_bkops(card) || !mmc_card_need_bkops(card) || card->host->bkops_trigger == ENCRYPT_MAGIC_NUMBER2) {
@@ -304,7 +317,8 @@ void mmc_start_bkops(struct mmc_card *card)
 	if (is_storage_encrypting)
 		timeout = 50000;
 
-	pr_info("%s: %s\n", mmc_hostname(card->host), __func__);
+	pr_info("%s: %s, level %d\n", mmc_hostname(card->host), __func__,
+		card->ext_csd.raw_bkops_status);
 	err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 			EXT_CSD_BKOPS_START, 1, timeout);
 	if (err) {
@@ -404,11 +418,9 @@ struct mmc_async_req *mmc_start_req(struct mmc_host *host,
 		mmc_pre_req(host, areq->mrq, !host->areq);
 
 	if (host->areq) {
-#ifdef CONFIG_MMC_PERF_PROFILING
 		ktime_t io_diff = ktime_get(), wait_diff = ktime_get(), wait_ready = ktime_get();
-#endif
 		mmc_wait_for_req_done(host, host->areq->mrq);
-#ifdef CONFIG_MMC_PERF_PROFILING
+
 		if (mmc_card_sd(host->card)) {
 			io_diff = ktime_sub(ktime_get(), host->areq->rq_stime);
 			if (ktime_to_us(io_diff) > 400000)
@@ -417,9 +429,8 @@ struct mmc_async_req *mmc_start_req(struct mmc_host *host,
 				host->areq->mrq->cmd->arg , host->areq->mrq->data->blocks , ktime_to_us(io_diff));
 			wait_ready = ktime_get();
 		}
-#endif
+
 		err = host->areq->err_check(host->card, host->areq);
-#ifdef CONFIG_MMC_PERF_PROFILING
 		if (mmc_card_sd(host->card)) {
 			wait_diff = ktime_sub(ktime_get(), wait_ready);
 			if (ktime_to_us(io_diff) > 400000)
@@ -427,14 +438,11 @@ struct mmc_async_req *mmc_start_req(struct mmc_host *host,
 				mmc_hostname(host), current->comm, host->areq->mrq->cmd->opcode, host->areq->mrq->cmd->arg,
 				host->areq->mrq->data->blocks, ktime_to_us(wait_diff), ktime_to_us(io_diff));
 		}
-#endif
 	}
 
 	if (!err && areq) {
-#ifdef CONFIG_MMC_PERF_PROFILING
 		if (mmc_card_sd(host->card))
 			areq->rq_stime = ktime_get();
-#endif
 		start_err = __mmc_start_req(host, areq->mrq);
 	}
 	if (host->areq)
@@ -608,7 +616,7 @@ void mmc_set_data_timeout(struct mmc_data *data, const struct mmc_card *card)
 		if (data->flags & MMC_DATA_WRITE)
 			limit_us = 3000000;
 		else
-			limit_us = 100000;
+			limit_us = 250000;
 
 		if (timeout_us > limit_us || mmc_card_blockaddr(card)) {
 			data->timeout_ns = limit_us * 1000;
@@ -1205,9 +1213,16 @@ void mmc_detect_change(struct mmc_host *host, unsigned long delay)
 	WARN_ON(host->removed);
 	spin_unlock_irqrestore(&host->lock, flags);
 #endif
+#if SD_DEBOUNCE_DEBUG
+	extern ktime_t detect_wq;
+#endif
 	host->detect_change = 1;
 
 	wake_lock(&host->detect_wake_lock);
+#if SD_DEBOUNCE_DEBUG
+	if (mmc_is_sd_host(host))
+		detect_wq = ktime_get();
+#endif
 	mmc_schedule_delayed_work(&host->detect, delay);
 }
 
@@ -1224,7 +1239,7 @@ int mmc_reinit_card(struct mmc_host *host)
 		host->bus_ops->resume) {
 		if (host->card && mmc_card_sd(host->card)) {
 			mmc_power_off(host);
-			mdelay(5);
+			msleep(100);
 		}
 		mmc_power_up(host);
 		err = host->bus_ops->resume(host);
@@ -1373,6 +1388,50 @@ static unsigned int mmc_erase_timeout(struct mmc_card *card,
 		return mmc_mmc_erase_timeout(card, arg, qty);
 }
 
+static int
+mmc_send_single_read(struct mmc_card *card, struct mmc_host *host, unsigned int from)
+{
+	struct mmc_request mrq = {NULL};
+	struct mmc_command cmd = {0};
+	struct mmc_data data = {0};
+	struct scatterlist sg;
+	char buf[512];
+	void *data_buf;
+	int len = 512;
+
+	data_buf = kmalloc(len, GFP_KERNEL);
+	if (data_buf == NULL)
+		return -ENOMEM;
+
+	mrq.cmd = &cmd;
+	mrq.data = &data;
+
+	cmd.opcode = MMC_READ_SINGLE_BLOCK;
+	cmd.arg = from;
+
+	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+
+	data.blksz = 512;
+	data.blocks = 1;
+	data.flags = MMC_DATA_READ;
+	data.sg = &sg;
+	data.sg_len = 1;
+
+	sg_init_one(&sg, data_buf, len);
+	mmc_set_data_timeout(&data, card);
+	mmc_wait_for_req(host, &mrq);
+
+	memcpy(buf, data_buf, len);
+	kfree(data_buf);
+
+	if (cmd.error)
+		return cmd.error;
+	if (data.error)
+		return data.error;
+
+	return 0;
+}
+
 static int mmc_do_erase(struct mmc_card *card, unsigned int from,
 			unsigned int to, unsigned int arg)
 {
@@ -1394,6 +1453,10 @@ static int mmc_do_erase(struct mmc_card *card, unsigned int from,
 		from <<= 9;
 		to <<= 9;
 	}
+
+	if (card->cid.manfid == 0x90)
+		if (mmc_send_single_read(card, card->host, from) != 0)
+			pr_err("%s, Dummy read failed\n", __func__);
 
 	start = ktime_get();
 	if (mmc_card_sd(card))
@@ -1877,7 +1940,25 @@ void mmc_rescan(struct work_struct *work)
 	struct mmc_host *host =
 		container_of(work, struct mmc_host, detect.work);
 	bool extend_wakelock = false;
-
+#if SD_DEBOUNCE_DEBUG
+	if (mmc_is_sd_host(host)) {
+		extern int SD_detect_debounce_time;
+		extern ktime_t detect_wq;
+		extern ktime_t irq_diff;
+		int wq_diff_time;
+		int irq_diff_time;
+		wq_diff_time = ktime_to_ms(ktime_sub(ktime_get(), detect_wq));
+		irq_diff_time = ktime_to_ms(irq_diff);
+		
+		if (wq_diff_time > SD_detect_debounce_time)
+			pr_info("%s: %s wq diff time= %d ms\n", mmc_hostname(host), __func__, wq_diff_time);
+		
+		if (wq_diff_time > irq_diff_time)
+			pr_err("%s: SD may not be rescanned successfully! "
+					"wq diff time = %d ms, irq diff time = %d ms\n",
+					mmc_hostname(host), wq_diff_time, irq_diff_time);
+	}
+#endif
 	if (host->rescan_disable)
 		return;
 
@@ -1888,9 +1969,6 @@ void mmc_rescan(struct work_struct *work)
 		host->bus_ops->detect(host);
 
 	host->detect_change = 0;
-	if (host->bus_dead)
-		extend_wakelock = 1;
-
 
 	if (host->bus_dead)
 		extend_wakelock = 1;
@@ -2060,6 +2138,9 @@ EXPORT_SYMBOL(mmc_card_stop_bkops);
 int mmc_card_support_bkops(struct mmc_card *card)
 {
 	if (card && mmc_card_mmc(card) && (card->ext_csd.rev >= 5 && card->ext_csd.bkops) && (card->host->caps & MMC_CAP_NONREMOVABLE)) {
+		
+		if (card->ext_csd.rev >= 6)
+			return 1;
 		if (card->cid.manfid == 0x15) {
 			
 			if (card->ext_csd.rev >= 6)
@@ -2074,7 +2155,7 @@ int mmc_card_support_bkops(struct mmc_card *card)
 			}
 			
 			if (card->ext_csd.sectors == 61071360) {
-				if ((card->cid.fwrev == 0x5) || (card->cid.fwrev == 0x15))
+				if ((card->cid.fwrev == 0x5) || (card->cid.fwrev == 0x7) || (card->cid.fwrev == 0x15))
 					return 1;
 				else
 					return 0;
@@ -2262,7 +2343,7 @@ int mmc_suspend_host(struct mmc_host *host)
 		}
 	}
 #ifdef CONFIG_PM_RUNTIME
-       if (mmc_bus_manual_resume(host))
+       if (mmc_bus_manual_resume(host) && !host->bkops_started)
                host->bus_resume_flags |= MMC_BUSRESUME_NEEDS_RESUME;
 #endif
 
@@ -2341,17 +2422,30 @@ int mmc_bkops_resume_task(struct mmc_host *host)
 						__func__, status, err, host->bkops_timer.need_bkops);
 					err = -EBUSY;
 				} else {
-					if (host->bkops_timer.need_bkops == 0)
-						host->bkops_count++;
 					pr_warning("%s: card ready status %x needbkops %u bkops_count %d\n",
 						__func__, status, host->bkops_timer.need_bkops, host->bkops_count);
 				}
 			}
 		} else {
-			host->bkops_count++;
-			pr_warning("%s: needbkops %u, bkops_count %d\n",
+			pr_debug("%s: needbkops %u, bkops_count %d\n",
 						__func__, host->bkops_timer.need_bkops, host->bkops_count);
-			host->bkops_timer.need_bkops = 0;
+			if (host->long_bkops && (mmc_read_bkops_status(host->card) == 0)) {
+				host->bkops_count++;
+				pr_info("%s: bkops_status %d, count %d\n", mmc_hostname(host),
+					host->card->ext_csd.raw_bkops_status, host->bkops_count);
+				if (host->card->ext_csd.raw_bkops_status == EXT_CSD_BKOPS_LEVEL_0) {
+					if (host->bkops_count > 20) {
+						pr_debug("%s: set need_bkops 0\n", mmc_hostname(host));
+						host->bkops_timer.need_bkops = 0;
+						host->bkops_count = 0;
+					}
+				} else
+					host->bkops_count = 0;
+			} else {
+				pr_debug("%s: set need_bkops 0\n", mmc_hostname(host));
+				host->bkops_timer.need_bkops = 0;
+				host->bkops_count = 0;
+			}
 		}
 	} else
 		pr_err("%s: mmc_send_status fail err= %d\n", __func__, err);
@@ -2374,7 +2468,8 @@ int mmc_resume_host(struct mmc_host *host)
 
 	mmc_bus_get(host);
 	if (mmc_bus_manual_resume(host)) {
-		host->bus_resume_flags |= MMC_BUSRESUME_NEEDS_RESUME;
+		if (!host->bkops_started)
+			host->bus_resume_flags |= MMC_BUSRESUME_NEEDS_RESUME;
 		mmc_bus_put(host);
 		return 0;
 	}

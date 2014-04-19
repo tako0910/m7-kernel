@@ -28,7 +28,6 @@
 #include <linux/spinlock.h>
 
 #include <linux/fb.h>
-#include <mach/debug_display.h>
 
 #include "mdp.h"
 #include "msm_fb.h"
@@ -46,16 +45,10 @@ enum {
 	WITH_CLIENT
 };
 
-#define CLOSE_WB 2
 static struct mdp4_overlay_pipe *writeback_pipe;
 static struct msm_fb_data_type *writeback_mfd;
 static int busy_wait_cnt;
-static int in_early_suspend = false;
-static int writeback_init = false;
-static int need_do_writeback_off = false;
-struct platform_device *wb_pdev = NULL;
-static DEFINE_MUTEX(writeback_lock);
-static int _footprint;
+static bool writeback_init_done = false;
 
 int mdp4_overlay_writeback_on(struct platform_device *pdev)
 {
@@ -75,9 +68,7 @@ int mdp4_overlay_writeback_on(struct platform_device *pdev)
 	if (mfd->key != MFD_KEY)
 		return -EINVAL;
 
-	pr_info("%s: enter fp=%d\n", __func__, _footprint);
 	writeback_mfd = mfd;		  
-	wb_pdev = pdev;
 
 	fbi = mfd->fbi;
 
@@ -125,7 +116,6 @@ int mdp4_overlay_writeback_on(struct platform_device *pdev)
 		(0x0 & 0xFFF));         
 
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
-	pr_info("%s: exit fp=%d\n", __func__, _footprint);
 	return ret;
 }
 
@@ -134,18 +124,6 @@ int mdp4_overlay_writeback_off(struct platform_device *pdev)
 	int ret;
 	struct msm_fb_data_type *mfd =
 			(struct msm_fb_data_type *)platform_get_drvdata(pdev);
-
-	mutex_lock(&writeback_lock);
-
-	if (writeback_pipe == NULL) {
-		mutex_unlock(&writeback_lock);
-		return 0;
-	}
-	need_do_writeback_off = false;
-
-	pr_info("%s: enter fb%d fp=%d, busy=%d\n",
-	    __func__, mfd->index, _footprint, mfd ? mfd->dma->busy : -1);
-
 	if (mfd && writeback_pipe) {
 		mdp4_writeback_dma_busy_wait(mfd);
 		mdp4_overlay_pipe_free(writeback_pipe);
@@ -160,31 +138,8 @@ int mdp4_overlay_writeback_off(struct platform_device *pdev)
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 	mdp_clk_ctrl(0);
 
-	pr_info("%s: exit fp=%d busy=%d\n", __func__, _footprint, mfd ? mfd->dma->busy : -1);
-	mutex_unlock(&writeback_lock);
-
 	return ret;
 }
-
-void mdp4_overlay_writeback_early_suspend(struct early_suspend *h)
-{
-	in_early_suspend = true;
-
-	if(writeback_pipe != NULL && wb_pdev != NULL) {
-		if (!writeback_init)
-			mdp4_overlay_writeback_off(wb_pdev);
-		else {
-			need_do_writeback_off = true;
-			PR_DISP_INFO("[%s] writeback processing...\n", __func__);
-		}
-	}
-}
-
-void mdp4_overlay_writeback_early_resume(struct early_suspend *h)
-{
-	in_early_suspend = false;
-}
-
 int mdp4_overlay_writeback_update(struct msm_fb_data_type *mfd, struct mdp4_overlay_pipe *ov_pipe)
 {
 	struct fb_info *fbi;
@@ -303,9 +258,6 @@ void mdp4_writeback_overlay_kickoff(struct msm_fb_data_type *mfd,
 				    struct mdp4_overlay_pipe *pipe)
 {
 	unsigned long flag;
-	_footprint = __LINE__;
-	if (in_early_suspend)
-		pr_warn("[DISP] %s after early_suspend state\n", __func__);
 	spin_lock_irqsave(&mdp_spin_lock, flag);
 	mdp_enable_irq(MDP_OVERLAY2_TERM);
 
@@ -320,9 +272,7 @@ void mdp4_writeback_overlay_kickoff(struct msm_fb_data_type *mfd,
 	mdp_pipe_kickoff(MDP_OVERLAY2_TERM, mfd);
 	wmb();
 	pr_debug("%s: before ov done interrupt\n", __func__);
-	_footprint = __LINE__;
 }
-
 void mdp4_writeback_dma_stop(struct msm_fb_data_type *mfd)
 {
 	
@@ -338,9 +288,14 @@ void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
 		struct mdp4_overlay_pipe *pipe)
 {
 	struct msmfb_writeback_data_list *node = NULL;
+
+	if (!writeback_init_done) {
+		printk("[DISP] mdp4_writeback_kickoff_video: writeback_init_done is false!\n");
+		return;
+	}
+
 	mutex_lock(&mfd->unregister_mutex);
 	mutex_lock(&mfd->writeback_mutex);
-	_footprint = __LINE__;
 	if (!list_empty(&mfd->writeback_free_queue)
 		&& mfd->writeback_state != WB_STOPING
 		&& mfd->writeback_state != WB_STOP) {
@@ -376,8 +331,6 @@ void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
 	mdp4_writeback_overlay_kickoff(mfd, pipe);
 	mdp4_writeback_dma_busy_wait(mfd);
 
-	_footprint = __LINE__;
-
 	
 	mdp4_overlay_iommu_pipe_free(pipe->pipe_ndx, 0);
 
@@ -387,6 +340,7 @@ void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
 	mfd->writeback_active_cnt--;
 	mutex_unlock(&mfd->unregister_mutex);
 	wake_up(&mfd->wait_q);
+
 }
 
 void mdp4_writeback_kickoff_ui(struct msm_fb_data_type *mfd,
@@ -465,7 +419,6 @@ fail_no_blt_addr:
 	mutex_unlock(&mfd->dma->ov_mutex);
 	mutex_unlock(&mfd->unregister_mutex);
 }
-
 static int mdp4_overlay_writeback_register_buffer(
 	struct msm_fb_data_type *mfd, struct msmfb_writeback_data_list *node)
 {
@@ -475,11 +428,8 @@ static int mdp4_overlay_writeback_register_buffer(
 	}
 	node->state = REGISTERED;
 	list_add_tail(&node->registered_entry, &mfd->writeback_register_queue);
-	mfd->register_buffer_cnt++;
-
 	return 0;
 }
-
 static struct msmfb_writeback_data_list *get_if_registered(
 			struct msm_fb_data_type *mfd, struct msmfb_data *data)
 {
@@ -557,8 +507,8 @@ static struct msmfb_writeback_data_list *get_if_registered(
  register_alloc_fail:
 	return NULL;
 }
-
-int mdp4_writeback_start(struct fb_info *info)
+int mdp4_writeback_start(
+		struct fb_info *info)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	mutex_lock(&mfd->writeback_mutex);
@@ -605,16 +555,7 @@ int mdp4_writeback_dequeue_buffer(struct fb_info *info, struct msmfb_data *data)
 	struct msmfb_writeback_data_list *node = NULL;
 	int rc = 0, domain;
 
-	if (mfd->register_buffer_cnt <= 1) {
-		if (need_do_writeback_off) {
-			need_do_writeback_off = false;
-			mdp4_overlay_writeback_off(wb_pdev);
-		}
-		writeback_init = false;
-	}
-
 	rc = wait_event_interruptible(mfd->wait_q, is_buffer_ready(mfd));
-
 	if (rc) {
 		pr_err("failed to get dequeued buffer\n");
 		return -ENOBUFS;
@@ -679,29 +620,20 @@ int mdp4_writeback_stop(struct fb_info *info)
 	mdp4_overlay_iommu_unmap_freelist(mixer);
 	return 0;
 }
-
 int mdp4_writeback_init(struct fb_info *info)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
-
-	if(writeback_pipe == NULL || in_early_suspend)
-		return -EPERM;
-
-	writeback_init = true;
-	wmb();
-
 	mutex_init(&mfd->writeback_mutex);
-
 	mutex_init(&mfd->unregister_mutex);
 	INIT_LIST_HEAD(&mfd->writeback_free_queue);
 	INIT_LIST_HEAD(&mfd->writeback_busy_queue);
 	INIT_LIST_HEAD(&mfd->writeback_register_queue);
-	mfd->register_buffer_cnt = 0;
 	mfd->writeback_state = WB_OPEN;
 	init_waitqueue_head(&mfd->wait_q);
+
+	writeback_init_done = true;
 	return 0;
 }
-
 int mdp4_writeback_terminate(struct fb_info *info)
 {
 	struct list_head *ptr, *next;
@@ -733,15 +665,11 @@ int mdp4_writeback_terminate(struct fb_info *info)
 	INIT_LIST_HEAD(&mfd->writeback_register_queue);
 	INIT_LIST_HEAD(&mfd->writeback_busy_queue);
 	INIT_LIST_HEAD(&mfd->writeback_free_queue);
-	mfd->register_buffer_cnt = 0;
+
 
 terminate_err:
 	mutex_unlock(&mfd->writeback_mutex);
 	mutex_unlock(&mfd->unregister_mutex);
-
-	
-	if(in_early_suspend)
-		return CLOSE_WB;
-	else
-		return rc;
+	writeback_init_done = false;
+	return rc;
 }

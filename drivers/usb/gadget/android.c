@@ -84,6 +84,7 @@ static int os_type;
 
 #include <linux/usb/htc_info.h>
 #include "f_projector.c"
+#include "f_projector2.c"
 
 #ifdef CONFIG_PERFLOCK
 #include <mach/perflock.h>
@@ -1242,8 +1243,8 @@ static int ncm_function_bind_config(struct android_usb_function *f,
 		ncm->ethaddr[0], ncm->ethaddr[1], ncm->ethaddr[2],
 		ncm->ethaddr[3], ncm->ethaddr[4], ncm->ethaddr[5]);
 
-	if (c->cdev->gadget)
-		c->cdev->gadget->miMaxMtu = 9000;
+    if (c->cdev->gadget)
+        c->cdev->gadget->miMaxMtu = ETH_FRAME_LEN_MAX - ETH_HLEN;
 	ret = gether_setup_name(c->cdev->gadget, ncm->ethaddr, "usb");
 	if (ret) {
 		pr_err("%s: gether_setup failed\n", __func__);
@@ -1845,6 +1846,99 @@ struct android_usb_function projector_function = {
 	.attributes = projector_function_attributes
 };
 
+static int projector2_function_init(struct android_usb_function *f,
+		struct usb_composite_dev *cdev)
+{
+	f->config = kzalloc(sizeof(struct hsml_protocol), GFP_KERNEL);
+	if (!f->config)
+		return -ENOMEM;
+
+	return projector2_setup(f->config);
+}
+
+static void projector2_function_cleanup(struct android_usb_function *f)
+{
+
+	projector2_cleanup();
+
+	if (f->config) {
+		kfree(f->config);
+		f->config = NULL;
+	}
+}
+
+static int projector2_function_bind_config(struct android_usb_function *f,
+		struct usb_configuration *c)
+{
+	return projector2_bind_config(c);
+}
+
+static ssize_t projector2_width_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct android_usb_function *f = dev_get_drvdata(dev);
+	struct hsml_protocol *config = f->config;
+	return snprintf(buf, PAGE_SIZE, "%d\n", config->set_display_info.wWidth);
+}
+
+static DEVICE_ATTR(client_width, S_IRUGO | S_IWUSR, projector2_width_show,
+						    NULL);
+
+static ssize_t projector2_height_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct android_usb_function *f = dev_get_drvdata(dev);
+	struct hsml_protocol *config = f->config;
+	return snprintf(buf, PAGE_SIZE, "%d\n", config->set_display_info.wHeight);
+}
+
+static DEVICE_ATTR(client_height, S_IRUGO | S_IWUSR, projector2_height_show,
+						    NULL);
+
+static ssize_t projector2_maxfps_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct android_usb_function *f = dev_get_drvdata(dev);
+	struct hsml_protocol *config = f->config;
+	return snprintf(buf, PAGE_SIZE, "%d\n", config->MaxFPS);
+}
+
+static DEVICE_ATTR(client_maxfps, S_IRUGO | S_IWUSR, projector2_maxfps_show,
+						    NULL);
+
+static ssize_t projector2_pixel_format_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct android_usb_function *f = dev_get_drvdata(dev);
+	struct hsml_protocol *config = f->config;
+	return snprintf(buf, PAGE_SIZE, "%d\n", config->set_display_info.bPixelFormat);
+}
+
+static DEVICE_ATTR(client_pixel_format, S_IRUGO | S_IWUSR, projector2_pixel_format_show,
+						    NULL);
+
+static DEVICE_ATTR(client_context_info, S_IRUGO | S_IWUSR, NULL, context_info_store);
+
+static struct device_attribute *projector2_function_attributes[] = {
+	&dev_attr_client_width,
+	&dev_attr_client_height,
+	&dev_attr_client_maxfps,
+	&dev_attr_client_pixel_format,
+	&dev_attr_client_context_info,
+	NULL
+};
+
+
+
+struct android_usb_function projector2_function = {
+	.name		= "projector2",
+	.init		= projector2_function_init,
+	.cleanup	= projector2_function_cleanup,
+	.bind_config	= projector2_function_bind_config,
+	.attributes = projector2_function_attributes
+};
+
+
 static struct android_usb_function *supported_functions[] = {
 	&rndis_function,
 	&accessory_function,
@@ -1862,6 +1956,7 @@ static struct android_usb_function *supported_functions[] = {
 	&modem_function,
 	&serial_function,
 	&projector_function,
+	&projector2_function,
 #ifdef CONFIG_USB_ANDROID_ACM
 	&acm_function,
 #endif
@@ -2406,6 +2501,9 @@ android_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c)
 
 	if (value < 0)
 		value = projector_ctrlrequest(cdev, c);
+
+	if (value < 0)
+		value = projector2_ctrlrequest(cdev, c);
 
 	if (value < 0)
 		value = composite_setup(gadget, c);

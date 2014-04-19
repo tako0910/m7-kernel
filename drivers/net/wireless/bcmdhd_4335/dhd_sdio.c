@@ -2220,7 +2220,7 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 			dhd_os_sdlock_txq(bus->dhd);
 			glom_cnt = MIN(DATABUFCNT(bus), bus->glomsize);
 			glom_cnt = MIN(glom_cnt, pktq_mlen(&bus->txq, tx_prec_map));
-			glom_cnt = MIN(glom_cnt, maxframes-cnt);
+			
 
 			
 			if (bus->glom_mode == SDPCM_TXGLOM_CPY)
@@ -2310,6 +2310,7 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 }
 
 static int bus_txctl_failed_num = 0;
+extern volatile bool dhd_mmc_suspend;
 
 int rxglom_fail_count = RXGLOM_FAIL_COUNT;
 int max_cntl_timeout =  MAX_CNTL_TIMEOUT;
@@ -2461,13 +2462,19 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 				DHD_ERROR(("%s: Device asleep already\n", __FUNCTION__));
 			} else if (ret < 0) {
 #if 1
-			
-			DHD_ERROR(("%s: sdio error %d, abort command and terminate frame 2.\n",
-			__FUNCTION__, ret));
-			bus->dhd->busstate = DHD_BUS_DOWN;
-			dhd_os_send_hang_message(bus->dhd);
+                
+                DHD_ERROR(("%s: sdio error %d, abort command and terminate frame 2.\n",
+                            __FUNCTION__, ret));
+                if(!dhd_mmc_suspend) {
+                    bus->dhd->busstate = DHD_BUS_DOWN;
+                    dhd_os_send_hang_message(bus->dhd);
+                }
+                else {
+                     DHD_ERROR(("%s: mmc is in suspend state, not send hang event\n",
+                                                             __FUNCTION__));
+                }
 #else
-			
+                
 				DHD_ERROR(("%s: sdio error %d, abort command and terminate frame.\n",
 				          __FUNCTION__, ret));
 				bus->tx_sderrs++;
@@ -4581,12 +4588,20 @@ dhdsdio_rxfail(dhd_bus_t *bus, bool abort, bool rtx)
 	}
 
 	bcmsdh_cfg_write(sdh, SDIO_FUNC_1, SBSDIO_FUNC1_FRAMECTRL, SFC_RF_TERM, &err);
+	if (err) {
+		DHD_ERROR(("%s: SBSDIO_FUNC1_FRAMECTRL cmd err\n", __FUNCTION__));
+		goto fail;
+	}
 	bus->f1regdata++;
 
 	
 	for (lastrbc = retries = 0xffff; retries > 0; retries--) {
 		hi = bcmsdh_cfg_read(sdh, SDIO_FUNC_1, SBSDIO_FUNC1_RFRAMEBCHI, NULL);
-		lo = bcmsdh_cfg_read(sdh, SDIO_FUNC_1, SBSDIO_FUNC1_RFRAMEBCLO, NULL);
+		lo = bcmsdh_cfg_read(sdh, SDIO_FUNC_1, SBSDIO_FUNC1_RFRAMEBCLO, &err);
+		if (err) {
+			DHD_ERROR(("%s: SBSDIO_FUNC1_RFAMEBCLO cmd err\n", __FUNCTION__));
+			goto fail;
+		}
 		bus->f1regdata += 2;
 
 		if ((hi == 0) && (lo == 0))
@@ -4617,6 +4632,7 @@ dhdsdio_rxfail(dhd_bus_t *bus, bool abort, bool rtx)
 	
 	bus->nextlen = 0;
 
+fail:
 	
 	if (err || bcmsdh_regfail(sdh))
 		bus->dhd->busstate = DHD_BUS_DOWN;
@@ -5992,7 +6008,7 @@ dhdsdio_dpc(dhd_bus_t *bus)
 		int err;
 		uint8 clkctl, devctl = 0;
 
-#ifdef DHD_DEBUG
+#if 0
 		
 		devctl = bcmsdh_cfg_read(sdh, SDIO_FUNC_1, SBSDIO_DEVICE_CTL, &err);
 		if (err) {
