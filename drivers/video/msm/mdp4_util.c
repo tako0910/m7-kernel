@@ -392,9 +392,8 @@ void mdp4_hw_init(void)
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 	mdp_clk_ctrl(1);
 
-#ifdef MDP4_ERROR
-	mdp4_sw_reset(0x17);
-#endif
+	if (mdp_hang)
+		mdp4_sw_reset(0x17);
 
 	if (mdp_rev > MDP_REV_41) {
 		

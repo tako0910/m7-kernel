@@ -384,7 +384,6 @@ static __be16 rmnet_ip_type_trans(struct sk_buff *skb,
 {
 	__be16	protocol = 0;
 
-	skb->dev = dev;
 
 	switch (skb->data[0] & 0xf0) {
 	case 0x40:
@@ -421,7 +420,9 @@ static void rmnet_usb_rx_complete(struct urb *rx_urb)
 			
 			unet_id = unet_offset + mux_id;
 			skb->dev = unet_list[unet_id]->net;
-			entry->dev = unet_list[unet_id];
+			
+		
+
 		}
 	}
 
