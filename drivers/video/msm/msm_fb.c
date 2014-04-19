@@ -1486,6 +1486,8 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 	default:
 		if (mfd->panel_power_on) {
 			int curr_pwr_state;
+			if (mdp_hang)
+				reset_mdp();
 
 			
 			if ((pdata) && (pdata->dimming_on))
@@ -1516,6 +1518,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 
 			msm_fb_release_timeline(mfd);
 			mfd->op_enable = TRUE;
+			mdp_hang = false;
 		}
 		break;
 	}
@@ -2420,6 +2423,9 @@ static int msm_fb_pan_display_ex(struct fb_info *info,
 	struct fb_var_screeninfo *var = &disp_commit->var;
 	u32 wait_for_finish = disp_commit->wait_for_finish;
 	int ret = 0;
+
+	if (mdp_hang)
+		return -ETIMEDOUT;
 
 	if (disp_commit->flags &
 		MDP_DISPLAY_COMMIT_OVERLAY) {
@@ -3695,6 +3701,9 @@ static int msmfb_overlay_vsync_ctrl(struct fb_info *info, void __user *argp)
 	int ret;
 	int enable;
 
+	if (mdp_hang)
+		return 0;
+
 	ret = copy_from_user(&enable, argp, sizeof(enable));
 	if (ret) {
 		pr_err("%s:msmfb_overlay_vsync ioctl failed", __func__);
@@ -3732,6 +3741,9 @@ static int msmfb_overlay_play(struct fb_info *info, unsigned long *argp)
 	struct msmfb_overlay_data req;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	struct msm_fb_panel_data *pdata;
+
+	if (mdp_hang)
+		return 0;
 
 	if (mfd->overlay_play_enable == 0)	
 		return 0;

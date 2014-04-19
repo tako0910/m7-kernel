@@ -155,8 +155,8 @@ static void mdp4_dsi_video_pipe_clean(struct vsync_update *vp)
 }
 
 static void mdp4_dsi_video_blt_ov_update(struct mdp4_overlay_pipe *pipe);
-static void mdp4_dsi_video_wait4dmap(int cndx);
-static void mdp4_dsi_video_wait4ov(int cndx);
+static int mdp4_dsi_video_wait4dmap(int cndx);
+static int mdp4_dsi_video_wait4ov(int cndx);
 
 int mdp4_dsi_video_pipe_commit(int cndx, int wait)
 {
@@ -269,10 +269,13 @@ int mdp4_dsi_video_pipe_commit(int cndx, int wait)
 	mdp4_stat.overlay_commit[pipe->mixer_num]++;
 
 	if (wait) {
-		if (pipe->ov_blt_addr)
-			mdp4_dsi_video_wait4ov(0);
-		else
-			mdp4_dsi_video_wait4dmap(0);
+		if (pipe->ov_blt_addr) {
+			if (mdp4_dsi_video_wait4ov(0))
+				mdp_hang = true;
+		} else {
+			if (mdp4_dsi_video_wait4dmap(0))
+				mdp_hang = true;
+		}
 	}
 
 	return cnt;
@@ -349,21 +352,28 @@ void mdp4_dsi_video_wait4vsync(int cndx)
 	mdp4_stat.wait4vsync0++;
 }
 
-static void mdp4_dsi_video_wait4dmap(int cndx)
+static int mdp4_dsi_video_wait4dmap(int cndx)
 {
 	struct vsycn_ctrl *vctrl;
+	int ret;
 
 	if (cndx >= MAX_CONTROLLER) {
 		pr_err("%s: out or range: cndx=%d\n", __func__, cndx);
-		return;
+		return 0;
 	}
 
 	vctrl = &vsync_ctrl_db[cndx];
 
 	if (atomic_read(&vctrl->suspend) > 0)
-		return;
+		return 0;
 
-	wait_for_completion(&vctrl->dmap_comp);
+	ret = wait_for_completion_timeout(&vctrl->dmap_comp, HZ / 5);
+	if (ret == 0) {
+		pr_err("wait4dmap timedout!\n");
+		return -1;
+	}
+
+	return 0;
 }
 
 
@@ -385,21 +395,28 @@ static void mdp4_dsi_video_wait4dmap_done(int cndx)
 	mdp4_dsi_video_wait4dmap(cndx);
 }
 
-static void mdp4_dsi_video_wait4ov(int cndx)
+static int mdp4_dsi_video_wait4ov(int cndx)
 {
 	struct vsycn_ctrl *vctrl;
+	int ret;
 
 	if (cndx >= MAX_CONTROLLER) {
 		pr_err("%s: out or range: cndx=%d\n", __func__, cndx);
-		return;
+		return 0;
 	}
 
 	vctrl = &vsync_ctrl_db[cndx];
 
 	if (atomic_read(&vctrl->suspend) > 0)
-		return;
+		return 0;
 
-	wait_for_completion(&vctrl->ov_comp);
+	ret = wait_for_completion_timeout(&vctrl->ov_comp, HZ /5);
+	if (ret == 0) {
+		pr_err("wait4ov timedout!\n");
+		return -1;
+	}
+
+	return 0;
 }
 
 ssize_t mdp4_dsi_video_show_event(struct device *dev,
@@ -1166,10 +1183,13 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 
 	cnt = mdp4_dsi_video_pipe_commit(cndx, 0);
 	if (cnt >= 0) {
-		if (pipe->ov_blt_addr)
-			mdp4_dsi_video_wait4ov(cndx);
-		else
-			mdp4_dsi_video_wait4dmap(cndx);
+		if (pipe->ov_blt_addr) {
+			if (mdp4_dsi_video_wait4ov(cndx))
+				mdp_hang = true;
+		} else {
+			if (mdp4_dsi_video_wait4dmap(cndx))
+				mdp_hang = true;
+		}
 	}
 
 	mdp4_overlay_mdp_perf_upd(mfd, 0);

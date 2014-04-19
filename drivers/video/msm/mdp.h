@@ -48,6 +48,7 @@ extern struct mdp_csc_cfg_data csc_cfg_matrix[];
 extern struct workqueue_struct *mdp_hist_wq;
 
 extern uint32 mdp_intr_mask;
+extern bool mdp_hang;
 
 #define MDP4_REVISION_V1		0
 #define MDP4_REVISION_V2		1
@@ -896,4 +897,5 @@ static inline void mdp_vid_quant_set(void)
 #endif
 int mdp_preset_lut_update_lcdc(struct fb_cmap *cmap, uint32_t *internal_lut);
 #endif
+void reset_mdp(void);
 #endif 
