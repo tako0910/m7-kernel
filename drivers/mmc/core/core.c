@@ -29,6 +29,7 @@
 #include <linux/wakelock.h>
 #include <linux/pm.h>
 #include <linux/slab.h>
+#include <linux/statfs.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
@@ -50,6 +51,7 @@
 #include <trace/events/mmcio.h>
 
 static struct workqueue_struct *workqueue;
+struct workqueue_struct *stats_workqueue = NULL;
 
 static struct wake_lock mmc_removal_work_wake_lock;
 
@@ -70,6 +72,182 @@ MODULE_PARM_DESC(
 #ifdef SD_DEBOUNCE_DEBUG
 extern int mmc_is_sd_host(struct mmc_host *mmc);
 #endif
+
+static int stats_interval = MMC_STATS_INTERVAL;
+#define K(x) ((x) << (PAGE_SHIFT - 10))
+void mmc_stats(struct work_struct *work)
+{
+	struct mmc_host *host =
+		container_of(work, struct mmc_host, stats_work.work);
+	unsigned long rtime, wtime;
+	unsigned long rbytes, wbytes, rcnt, wcnt;
+	unsigned long wperf = 0, rperf = 0;
+	unsigned long flags;
+	u64 val;
+	struct kstatfs stat;
+	unsigned long free = 0;
+	int reset_low_perf_data = 1;
+	
+	unsigned long rtime_rand = 0, wtime_rand = 0;
+	unsigned long rbytes_rand = 0, wbytes_rand = 0, rcnt_rand = 0, wcnt_rand = 0;
+	unsigned long wperf_rand = 0, rperf_rand = 0;
+	
+	if (!host || !host->perf_enable || !stats_workqueue)
+		return;
+
+	spin_lock_irqsave(&host->lock, flags);
+
+	rbytes = host->perf.rbytes_drv;
+	wbytes = host->perf.wbytes_drv;
+	rcnt = host->perf.rcount;
+	wcnt = host->perf.wcount;
+	rtime = (unsigned long)ktime_to_us(host->perf.rtime_drv);
+	wtime = (unsigned long)ktime_to_us(host->perf.wtime_drv);
+	host->perf.rbytes_drv = host->perf.wbytes_drv = 0;
+	host->perf.rcount = host->perf.wcount = 0;
+	host->perf.rtime_drv = ktime_set(0, 0);
+	host->perf.wtime_drv = ktime_set(0, 0);
+	
+	if (host->debug_mask & MMC_DEBUG_RANDOM_RW) {
+		rbytes_rand = host->perf.rbytes_drv_rand;
+		wbytes_rand = host->perf.wbytes_drv_rand;
+		rcnt_rand = host->perf.rcount_rand;
+		wcnt_rand = host->perf.wcount_rand;
+		rtime_rand = (unsigned long)ktime_to_us(host->perf.rtime_drv_rand);
+		wtime_rand = (unsigned long)ktime_to_us(host->perf.wtime_drv_rand);
+
+		host->perf.rbytes_drv_rand = host->perf.wbytes_drv_rand = 0;
+		host->perf.rcount_rand = host->perf.wcount_rand = 0;
+		host->perf.rtime_drv_rand = ktime_set(0, 0);
+		host->perf.wtime_drv_rand = ktime_set(0, 0);
+
+	}
+	
+
+	spin_unlock_irqrestore(&host->lock, flags);
+
+	if (wtime) {
+		val = ((u64)wbytes / 1024) * 1000000;
+		do_div(val, wtime);
+		wperf = (unsigned long)val;
+	}
+	if (rtime) {
+		val = ((u64)rbytes / 1024) * 1000000;
+		do_div(val, rtime);
+		rperf = (unsigned long)val;
+	}
+
+	if (host->debug_mask & MMC_DEBUG_FREE_SPACE) {
+		struct file *file;
+		file = filp_open("/data", O_RDONLY, 0);
+		if (!IS_ERR(file)) {
+			vfs_statfs(&file->f_path, &stat);
+			filp_close(file, NULL);
+			free = (unsigned long)stat.f_bfree;
+			free /= 256; 
+		}
+	}
+
+	
+	wtime /= 1000;
+	rtime /= 1000;
+
+	
+	if (!wtime)
+		reset_low_perf_data = 0;
+	else if (wperf < 100) {
+		host->perf.lp_duration += stats_interval; 
+		host->perf.wbytes_low_perf += wbytes;
+		host->perf.wtime_low_perf += wtime; 
+		if (host->perf.lp_duration >= 600000) {
+			unsigned long perf;
+			val = ((u64)host->perf.wbytes_low_perf / 1024) * 1000;
+			do_div(val, host->perf.wtime_low_perf);
+			perf = (unsigned long)val;
+			pr_err("%s Statistics: write %lu KB in %lu ms, perf %lu KB/s, duration %lu sec\n",
+					mmc_hostname(host), host->perf.wbytes_low_perf / 1024,
+					host->perf.wtime_low_perf,
+					perf, host->perf.lp_duration / 1000);
+		} else
+			reset_low_perf_data = 0;
+	}
+	if (host->perf.lp_duration && reset_low_perf_data) {
+		host->perf.lp_duration = 0;
+		host->perf.wbytes_low_perf = 0;
+		host->perf.wtime_low_perf = 0;
+	}
+
+	
+	if ((wtime > 500) || (wtime && (stats_interval == MMC_STATS_LOG_INTERVAL)))  {
+		#if 0
+		pr_info("%s Statistics: dirty %luKB, writeback %luKB\n", mmc_hostname(host),
+				K(global_page_state(NR_FILE_DIRTY)), K(global_page_state(NR_WRITEBACK)));
+		#endif
+		if (host->debug_mask & MMC_DEBUG_FREE_SPACE)
+			pr_info("%s Statistics: write %lu KB in %lu ms, perf %lu KB/s, rq %lu, /data free %lu MB\n",
+					mmc_hostname(host), wbytes / 1024, wtime, wperf, wcnt, free);
+		else
+			pr_info("%s Statistics: write %lu KB in %lu ms, perf %lu KB/s, rq %lu\n",
+					mmc_hostname(host), wbytes / 1024, wtime, wperf, wcnt);
+	}
+	if ((rtime > 500) || (rtime && (stats_interval == MMC_STATS_LOG_INTERVAL)))  {
+		if (host->debug_mask & MMC_DEBUG_FREE_SPACE)
+			pr_info("%s Statistics: read %lu KB in %lu ms, perf %lu KB/s, rq %lu, /data free %lu MB\n",
+					mmc_hostname(host), rbytes / 1024, rtime, rperf, rcnt, free);
+		else
+			pr_info("%s Statistics: read %lu KB in %lu ms, perf %lu KB/s, rq %lu\n",
+					mmc_hostname(host), rbytes / 1024, rtime, rperf, rcnt);
+	}
+
+	
+	if (host->debug_mask & MMC_DEBUG_RANDOM_RW) {
+		if (wtime_rand) {
+			val = ((u64)wbytes_rand / 1024) * 1000000;
+			do_div(val, wtime_rand);
+			wperf_rand = (unsigned long)val;
+		}
+		if (rtime_rand) {
+			val = ((u64)rbytes_rand / 1024) * 1000000;
+			do_div(val, rtime_rand);
+			rperf_rand = (unsigned long)val;
+		}
+		wtime_rand /= 1000;
+		rtime_rand /= 1000;
+		if (wperf_rand && wtime_rand) {
+			if (host->debug_mask & MMC_DEBUG_FREE_SPACE)
+				pr_info("%s Statistics: random write %lu KB in %lu ms, perf %lu KB/s, rq %lu, /data free %lu MB\n",
+						mmc_hostname(host), wbytes_rand / 1024, wtime_rand, wperf_rand, wcnt_rand, free);
+			else
+				pr_info("%s Statistics: random write %lu KB in %lu ms, perf %lu KB/s, rq %lu\n",
+						mmc_hostname(host), wbytes_rand / 1024, wtime_rand, wperf_rand, wcnt_rand);
+		}
+		if (rperf_rand && rtime_rand) {
+			if (host->debug_mask & MMC_DEBUG_FREE_SPACE)
+				pr_info("%s Statistics: random read %lu KB in %lu ms, perf %lu KB/s, rq %lu, /data free %lu MB\n",
+						mmc_hostname(host), rbytes_rand / 1024, rtime_rand, rperf_rand, rcnt_rand, free);
+			else
+				pr_info("%s Statistics: random read %lu KB in %lu ms, perf %lu KB/s, rq %lu\n",
+						mmc_hostname(host), rbytes_rand / 1024, rtime_rand, rperf_rand, rcnt_rand);
+		}
+	}
+	
+
+	if (host->debug_mask & MMC_DEBUG_MEMORY) {
+		struct sysinfo mi;
+		long cached;
+		si_meminfo(&mi);
+		cached = global_page_state(NR_FILE_PAGES) -
+			total_swapcache_pages - mi.bufferram;
+		pr_info("meminfo: total %lu KB, free %lu KB, buffers %lu KB, cached %lu KB \n",
+				K(mi.totalram),
+				K(mi.freeram),
+				K(mi.bufferram),
+				K(cached));
+	}
+
+	queue_delayed_work(stats_workqueue, &host->stats_work, msecs_to_jiffies(stats_interval));
+	return;
+}
 int mmc_schedule_card_removal_work(struct delayed_work *work,
                                     unsigned long delay)
 {
@@ -161,6 +339,16 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 						ktime_add(host->perf.rtime_drv,
 							diff);
 					host->perf.rcount++;
+					if (host->debug_mask & MMC_DEBUG_RANDOM_RW) {
+						if (mrq->data->bytes_xfered <= 32*1024) {
+							host->perf.rbytes_drv_rand +=
+								mrq->data->bytes_xfered;
+							host->perf.rtime_drv_rand =
+								ktime_add(host->perf.rtime_drv_rand,
+										diff);
+							host->perf.rcount_rand++;
+						}
+					}
 				} else {
 					host->perf.wbytes_drv +=
 						mrq->data->bytes_xfered;
@@ -168,6 +356,16 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 						ktime_add(host->perf.wtime_drv,
 							diff);
 					host->perf.wcount++;
+					if (host->debug_mask & MMC_DEBUG_RANDOM_RW) {
+						if (mrq->data->bytes_xfered <= 32*1024) {
+							host->perf.wbytes_drv_rand +=
+								mrq->data->bytes_xfered;
+							host->perf.wtime_drv_rand =
+								ktime_add(host->perf.wtime_drv_rand,
+										diff);
+							host->perf.wcount_rand++;
+						}
+					}
 				}
 				spin_unlock_irqrestore(&host->lock, flags);
 			}
@@ -1333,9 +1531,10 @@ void mmc_remove_sd_card(struct work_struct *work)
 {
 	struct mmc_host *host =
 		container_of(work, struct mmc_host, remove.work);
+	const unsigned int REDETECT_MAX = 5;
 
-	printk(KERN_INFO "%s: %s\n", mmc_hostname(host),
-		__func__);
+	printk(KERN_INFO "%s: %s, redetect_cnt : %d\n", mmc_hostname(host),
+		__func__, host->redetect_cnt);
 
 	mod_timer(&sd_remove_tout_timer, (jiffies + msecs_to_jiffies(5000)));
 	mmc_bus_get(host);
@@ -1344,7 +1543,6 @@ void mmc_remove_sd_card(struct work_struct *work)
 			host->bus_ops->remove(host);
 		mmc_claim_host(host);
 		mmc_detach_bus(host);
-		mdelay(500);
 		mmc_release_host(host);
 	}
 	mmc_bus_put(host);
@@ -1354,6 +1552,9 @@ void mmc_remove_sd_card(struct work_struct *work)
 		__func__);
 
 	del_timer_sync(&sd_remove_tout_timer);
+
+	if (host->ops->get_cd(host) && host->redetect_cnt++ < REDETECT_MAX)
+		mmc_detect_change(host, 0);
 }
 
 void mmc_init_erase(struct mmc_card *card)
@@ -1535,7 +1736,6 @@ static int mmc_do_erase(struct mmc_card *card, unsigned int from,
 		if (mmc_send_single_read(card, card->host, from) != 0)
 			pr_err("%s, Dummy read failed\n", __func__);
 
-	start = ktime_get();
 	if (mmc_card_sd(card))
 		cmd.opcode = SD_ERASE_WR_BLK_START;
 	else
@@ -1564,6 +1764,11 @@ static int mmc_do_erase(struct mmc_card *card, unsigned int from,
 		err = -EIO;
 		goto out;
 	}
+
+	if (mmc_card_mmc(card))
+		trace_mmc_req_start(&(card->host->class_dev), MMC_ERASE,
+			from, to - from + 1);
+	start = ktime_get();
 
 	memset(&cmd, 0, sizeof(struct mmc_command));
 	cmd.opcode = MMC_ERASE;
@@ -1600,7 +1805,7 @@ out:
 	diff = ktime_sub(ktime_get(), start);
 	if (card->host->tp_enable)
 		trace_mmc_request_done(&(card->host->class_dev), MMC_ERASE,
-			from, to - from, ktime_to_ms(diff));
+			from, to - from + 1, ktime_to_ms(diff));
 	return err;
 }
 
@@ -2554,6 +2759,7 @@ static void mmc_req_tout_timer_hdlr(unsigned long data)
 	del_timer(&sd_remove_tout_timer);
 }
 
+extern unsigned int get_tamper_sf(void);
 static int __init mmc_init(void)
 {
 	int ret;
@@ -2561,6 +2767,11 @@ static int __init mmc_init(void)
 	workqueue = alloc_ordered_workqueue("kmmcd", 0);
 	if (!workqueue)
 		return -ENOMEM;
+	stats_workqueue = create_singlethread_workqueue("mmc_stats");
+	if (!stats_workqueue)
+		return -ENOMEM;
+	if (get_tamper_sf() == 1)
+		stats_interval = MMC_STATS_LOG_INTERVAL;
 
 	wake_lock_init(&mmc_removal_work_wake_lock, WAKE_LOCK_SUSPEND,
 		       "mmc_removal_work");
@@ -2588,6 +2799,8 @@ unregister_bus:
 	mmc_unregister_bus();
 destroy_workqueue:
 	destroy_workqueue(workqueue);
+	if (stats_workqueue)
+		destroy_workqueue(stats_workqueue);
 	wake_lock_destroy(&mmc_removal_work_wake_lock);
 
 	return ret;
@@ -2599,6 +2812,8 @@ static void __exit mmc_exit(void)
 	mmc_unregister_host_class();
 	mmc_unregister_bus();
 	destroy_workqueue(workqueue);
+	if (stats_workqueue)
+		destroy_workqueue(stats_workqueue);
 	wake_lock_destroy(&mmc_removal_work_wake_lock);
 	del_timer_sync(&sd_remove_tout_timer);
 }

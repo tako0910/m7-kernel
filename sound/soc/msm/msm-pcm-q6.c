@@ -183,7 +183,7 @@ static void event_handler(uint32_t opcode,
 
 		
 		if (in_frame_info[token][0]) {
-			prtd->pcm_irq_pos += in_frame_info[token][0];
+			prtd->pcm_irq_pos += prtd->pcm_count;
 			pr_debug("pcm_irq_pos=%d\n", prtd->pcm_irq_pos);
 			if (atomic_read(&prtd->start))
 				snd_pcm_period_elapsed(substream);
@@ -527,13 +527,14 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 		if (!ret)
 			pr_err("%s: CMD_EOS failed\n", __func__);
         }
-	q6asm_cmd(prtd->audio_client, CMD_CLOSE);
-	q6asm_audio_client_buf_free_contiguous(dir,
-				prtd->audio_client);
-
+	if(prtd->audio_client) {
+		q6asm_cmd(prtd->audio_client, CMD_CLOSE);
+		q6asm_audio_client_buf_free_contiguous(dir,
+			prtd->audio_client);
+		q6asm_audio_client_free(prtd->audio_client);
+	}
 	msm_pcm_routing_dereg_phy_stream(soc_prtd->dai_link->be_id,
 	SNDRV_PCM_STREAM_PLAYBACK);
-	q6asm_audio_client_free(prtd->audio_client);
 	kfree(prtd);
 	return 0;
 }
@@ -734,7 +735,7 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 		if (ret < 0) {
 			pr_err("%s: q6asm_open_write_v2 failed\n", __func__);
 			q6asm_audio_client_free(prtd->audio_client);
-			kfree(prtd);
+			prtd->audio_client = NULL;
 			return -ENOMEM;
 		}
 

@@ -34,6 +34,7 @@
 #define KGSL_CMD_FLAGS_PMODE		0x00000001
 #define KGSL_CMD_FLAGS_INTERNAL_ISSUE	0x00000002
 #define KGSL_CMD_FLAGS_GET_INT		0x00000004
+#define KGSL_CMD_FLAGS_PWRON_FIXUP      0x00000008
 #define KGSL_CMD_FLAGS_EOF	        0x00000100
 
 #define KGSL_CONTEXT_TO_MEM_IDENTIFIER	0x2EADBEEF
@@ -43,6 +44,7 @@
 #define KGSL_END_OF_IB_IDENTIFIER	0x2ABEDEAD
 #define KGSL_END_OF_FRAME_IDENTIFIER	0x2E0F2E0F
 #define KGSL_NOP_IB_IDENTIFIER	        0x20F20F20
+#define KGSL_PWRON_FIXUP_IDENTIFIER	0x2AFAFAFA
 
 #ifdef CONFIG_MSM_SCM
 #define ADRENO_DEFAULT_PWRSCALE_POLICY  (&kgsl_pwrscale_policy_tz)
@@ -51,8 +53,6 @@
 #else
 #define ADRENO_DEFAULT_PWRSCALE_POLICY  NULL
 #endif
-
-void adreno_debugfs_init(struct kgsl_device *device);
 
 #define ADRENO_ISTORE_START 0x5000 
 
@@ -77,6 +77,7 @@ struct adreno_gpudev;
 
 struct adreno_device {
 	struct kgsl_device dev;    
+	unsigned long priv;
 	unsigned int chip_id;
 	enum adreno_gpurev gpurev;
 	unsigned long gmem_base;
@@ -109,9 +110,8 @@ struct adreno_device {
 	struct ocmem_buf *ocmem_hdl;
 	unsigned int ocmem_base;
 	unsigned int gpu_cycles;
-	struct kgsl_memdesc on_resume_cmd;
-	unsigned int on_resume_ib[3];
-	bool on_resume_issueib;
+	struct kgsl_memdesc pwron_fixup;
+	unsigned int pwron_fixup_dwords;
 };
 
 #define PERFCOUNTER_FLAG_NONE 0x0
@@ -133,6 +133,11 @@ struct adreno_perfcount_group {
 struct adreno_perfcounters {
 	struct adreno_perfcount_group *groups;
 	unsigned int group_count;
+};
+
+enum adreno_device_flags {
+	ADRENO_DEVICE_PWRON = 0,
+	ADRENO_DEVICE_PWRON_FIXUP = 1,
 };
 
 struct adreno_gpudev {
@@ -183,6 +188,8 @@ struct adreno_ft_data {
 	unsigned int replay_for_snapshot;
 };
 
+#define FT_DETECT_REGS_COUNT 12
+
 #define  KGSL_FT_DISABLE                  BIT(0)
 #define  KGSL_FT_REPLAY                   BIT(1)
 #define  KGSL_FT_SKIPIB                   BIT(2)
@@ -190,10 +197,10 @@ struct adreno_ft_data {
 #define  KGSL_FT_TEMP_DISABLE             BIT(4)
 #define  KGSL_FT_DEFAULT_POLICY           (KGSL_FT_REPLAY + KGSL_FT_SKIPIB)
 
-#define KGSL_FT_PAGEFAULT_INT_ENABLE         0x00000001
-#define KGSL_FT_PAGEFAULT_GPUHALT_ENABLE     0x00000002
-#define KGSL_FT_PAGEFAULT_LOG_ONE_PER_PAGE   0x00000004
-#define KGSL_FT_PAGEFAULT_LOG_ONE_PER_INT    0x00000008
+#define KGSL_FT_PAGEFAULT_INT_ENABLE         BIT(0)
+#define KGSL_FT_PAGEFAULT_GPUHALT_ENABLE     BIT(1)
+#define KGSL_FT_PAGEFAULT_LOG_ONE_PER_PAGE   BIT(2)
+#define KGSL_FT_PAGEFAULT_LOG_ONE_PER_INT    BIT(3)
 #define KGSL_FT_PAGEFAULT_DEFAULT_POLICY     (KGSL_FT_PAGEFAULT_INT_ENABLE + \
 					KGSL_FT_PAGEFAULT_GPUHALT_ENABLE)
 
@@ -217,7 +224,6 @@ extern const unsigned int a330_registers[];
 extern const unsigned int a330_registers_count;
 
 extern unsigned int ft_detect_regs[];
-extern const unsigned int ft_detect_regs_count;
 
 
 int adreno_idle(struct kgsl_device *device);
@@ -258,6 +264,11 @@ int adreno_perfcounter_get(struct adreno_device *adreno_dev,
 
 int adreno_perfcounter_put(struct adreno_device *adreno_dev,
 	unsigned int groupid, unsigned int countable);
+
+int adreno_ft_init_sysfs(struct kgsl_device *device);
+void adreno_ft_uninit_sysfs(struct kgsl_device *device);
+
+int adreno_a3xx_pwron_fixup_init(struct adreno_device *adreno_dev);
 
 static inline int adreno_is_a200(struct adreno_device *adreno_dev)
 {
@@ -425,5 +436,11 @@ static inline int adreno_add_idle_cmds(struct adreno_device *adreno_dev,
 
 	return cmds - start;
 }
+
+#ifdef CONFIG_DEBUG_FS
+void adreno_debugfs_init(struct kgsl_device *device);
+#else
+static inline void adreno_debugfs_init(struct kgsl_device *device) { }
+#endif
 
 #endif 

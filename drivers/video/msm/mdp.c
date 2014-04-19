@@ -2838,6 +2838,9 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->mem_hid = 0;
 	}
 
+	mfd->mem_hid |= BIT(ION_IOMMU_HEAP_ID);
+	mfd->mem_hid &= ~ION_SECURE;
+
 	
 	mdp_hist_lut_init();
 	mdp_histogram_init();

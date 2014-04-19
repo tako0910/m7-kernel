@@ -54,7 +54,7 @@ adreno_ringbuffer_waitspace(struct adreno_ringbuffer *rb,
 	unsigned long wait_time;
 	unsigned long wait_timeout = msecs_to_jiffies(ADRENO_IDLE_TIMEOUT);
 	unsigned long wait_time_part;
-	unsigned int prev_reg_val[ft_detect_regs_count];
+	unsigned int prev_reg_val[FT_DETECT_REGS_COUNT];
 
 	memset(prev_reg_val, 0, sizeof(prev_reg_val));
 
@@ -539,12 +539,31 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	if (KGSL_MEMSTORE_GLOBAL != context_id)
 		total_sizedwords += 3; 
 
+	if (flags & KGSL_CMD_FLAGS_EOF)
+		total_sizedwords += 2;
+
+	
+	if (flags & KGSL_CMD_FLAGS_PWRON_FIXUP)
+		total_sizedwords += 5;
+
 	ringcmds = adreno_ringbuffer_allocspace(rb, context, total_sizedwords);
 	if (!ringcmds)
 		return -ENOSPC;
 
 	rcmd_gpu = rb->buffer_desc.gpuaddr
 		+ sizeof(uint)*(rb->wptr-total_sizedwords);
+
+	if (flags & KGSL_CMD_FLAGS_PWRON_FIXUP) {
+		GSL_RB_WRITE(ringcmds, rcmd_gpu, cp_nop_packet(1));
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+				KGSL_PWRON_FIXUP_IDENTIFIER);
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			CP_HDR_INDIRECT_BUFFER_PFD);
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			adreno_dev->pwron_fixup.gpuaddr);
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			adreno_dev->pwron_fixup_dwords);
+	}
 
 	GSL_RB_WRITE(ringcmds, rcmd_gpu, cp_nop_packet(1));
 	GSL_RB_WRITE(ringcmds, rcmd_gpu, KGSL_CMD_IDENTIFIER);
@@ -1003,9 +1022,18 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 	} else
 		drawctxt->timestamp++;
 
+	flags &= KGSL_CMD_FLAGS_EOF;
+
+
+	if (test_and_clear_bit(ADRENO_DEVICE_PWRON, &adreno_dev->priv) &&
+	    test_bit(ADRENO_DEVICE_PWRON_FIXUP, &adreno_dev->priv))
+	{
+		flags |= KGSL_CMD_FLAGS_PWRON_FIXUP;
+	}
+
 	ret = adreno_ringbuffer_addcmds(&adreno_dev->ringbuffer,
 					drawctxt,
-					(flags & KGSL_CMD_FLAGS_EOF),
+					flags,
 					&link[0], (cmds - link));
 	if (ret)
 		goto done;
@@ -1025,9 +1053,9 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 	}
 
 done:
-	if (context != NULL && drawctxt != NULL)
-		kgsl_trace_issueibcmds(device, context->id, ibdesc, numibs,
-			*timestamp, flags, ret, drawctxt->type);
+	kgsl_trace_issueibcmds(device, context ? context->id : 0, ibdesc,
+		numibs, *timestamp, flags, ret,
+		drawctxt ? drawctxt->type : 0);
 
 	kfree(link);
 	return ret;

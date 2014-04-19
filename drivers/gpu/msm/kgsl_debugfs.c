@@ -17,13 +17,27 @@
 #include "kgsl.h"
 #include "kgsl_device.h"
 #include "kgsl_sharedmem.h"
+#include "kgsl_htc.h"
 
-#define KGSL_LOG_LEVEL_DEFAULT 3
 #define KGSL_LOG_LEVEL_MAX     7
 
 struct dentry *kgsl_debugfs_dir;
 static struct dentry *pm_d_debugfs;
 struct dentry *proc_d_debugfs;
+
+static int ctx_dump_set(void* data, u64 val)
+{
+	struct kgsl_device *device = data;
+
+	read_lock(&device->context_lock);
+	kgsl_dump_contextpid_locked(&device->context_idr);
+	read_unlock(&device->context_lock);
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(ctx_dump_fops,
+		NULL,
+		ctx_dump_set, "%llu\n");
 
 static int pm_dump_set(void *data, u64 val)
 {
@@ -174,13 +188,6 @@ void kgsl_device_debugfs_init(struct kgsl_device *device)
 	if (!device->d_debugfs || IS_ERR(device->d_debugfs))
 		return;
 
-	device->cmd_log = KGSL_LOG_LEVEL_DEFAULT;
-	device->ctxt_log = KGSL_LOG_LEVEL_DEFAULT;
-	device->drv_log = KGSL_LOG_LEVEL_DEFAULT;
-	device->mem_log = KGSL_LOG_LEVEL_DEFAULT;
-	device->pwr_log = KGSL_LOG_LEVEL_DEFAULT;
-	device->ft_log = KGSL_LOG_LEVEL_DEFAULT;
-
 	debugfs_create_file("log_level_cmd", 0644, device->d_debugfs, device,
 			    &cmd_log_fops);
 	debugfs_create_file("log_level_ctxt", 0644, device->d_debugfs, device,
@@ -193,6 +200,8 @@ void kgsl_device_debugfs_init(struct kgsl_device *device)
 				&pwr_log_fops);
 	debugfs_create_file("memfree_history", 0444, device->d_debugfs, device,
 				&memfree_hist_fops);
+	debugfs_create_file("contexpid_dump",  0644, device->d_debugfs, device,
+				&ctx_dump_fops);
 
 	
 
@@ -207,7 +216,6 @@ void kgsl_device_debugfs_init(struct kgsl_device *device)
 			    &pm_regs_enabled_fops);
 	debugfs_create_file("ib_enabled", 0644, pm_d_debugfs, device,
 				    &pm_ib_enabled_fops);
-	device->pm_dump_enable = 0;
 	debugfs_create_file("enable", 0644, pm_d_debugfs, device,
 				    &pm_enabled_fops);
 
