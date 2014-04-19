@@ -16,12 +16,12 @@
 			|| defined(CONFIG_MACH_DELUXE_U) || defined(CONFIG_MACH_DELUXE_UL) || defined(CONFIG_MACH_DELUXE_UB1)\
 			|| defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
 			|| defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
-			|| defined(CONFIG_MACH_DUMMY)|| defined(CONFIG_MACH_DUMMY)
+			|| defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
 
 
 #if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
 || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
-|| defined(CONFIG_MACH_DUMMY)|| defined(CONFIG_MACH_DUMMY)
+|| defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
 
 #define MAX_I2C_RETRIES 2
 #else
@@ -71,7 +71,7 @@ int32_t msm_camera_i2c_rxdata(struct msm_camera_i2c_client *dev_client,
 		|| defined(CONFIG_MACH_DELUXE_U) || defined(CONFIG_MACH_DELUXE_UL) || defined(CONFIG_MACH_DELUXE_UB1)\
         || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
         || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
-        || defined(CONFIG_MACH_DUMMY)|| defined(CONFIG_MACH_DUMMY)
+        || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
 	rc = i2c_transfer_retry(dev_client->client->adapter, msgs, 2);
 #else
 	rc = i2c_transfer(dev_client->client->adapter, msgs, 2);
@@ -98,7 +98,7 @@ int32_t msm_camera_i2c_txdata(struct msm_camera_i2c_client *dev_client,
 			|| defined(CONFIG_MACH_DELUXE_U) || defined(CONFIG_MACH_DELUXE_UL) || defined(CONFIG_MACH_DELUXE_UB1)\
             || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
             || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)\
-            || defined(CONFIG_MACH_DUMMY)|| defined(CONFIG_MACH_DUMMY)
+            || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
 	rc = i2c_transfer_retry(dev_client->client->adapter, msg, 1);
 #else
 	rc = i2c_transfer(dev_client->client->adapter, msg, 1);

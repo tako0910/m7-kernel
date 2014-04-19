@@ -99,6 +99,7 @@ tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec); \
 static void msmsdcc_dbg_createhost(struct msmsdcc_host *);
 static struct dentry *debugfs_dir;
 static struct dentry *debugfs_file;
+static struct dentry *debugfs_prealloc;
 static int  msmsdcc_dbg_init(void);
 #endif
 
@@ -141,6 +142,7 @@ static const u32 tuning_block_128[] = {
 	0xFFFFBBBB, 0xFFFF77FF, 0xFF7777FF, 0xEEDDBB77
 };
 
+unsigned int prealloc_size = 0;
 const int SD_detect_debounce_time = 50;
 #if SD_DEBOUNCE_DEBUG
 static ktime_t last_irq;
@@ -5721,6 +5723,9 @@ msmsdcc_probe(struct platform_device *pdev)
 
 	
 
+	if (plat->prealloc_size)
+		prealloc_size = plat->prealloc_size;
+
 	mmc->max_segs = msmsdcc_get_nr_sg(host);
 	mmc->max_blk_size = MMC_MAX_BLK_SIZE;
 	mmc->max_blk_count = MMC_MAX_BLK_CNT;
@@ -6990,6 +6995,7 @@ static void __exit msmsdcc_exit(void)
 	platform_driver_unregister(&msmsdcc_driver);
 
 #if defined(CONFIG_DEBUG_FS)
+	debugfs_remove(debugfs_prealloc);
 	debugfs_remove(debugfs_file);
 	debugfs_remove(debugfs_dir);
 #endif
@@ -7058,6 +7064,38 @@ static void msmsdcc_dbg_createhost(struct msmsdcc_host *host)
 	}
 }
 
+static int
+msmsdcc_prealloc_open(struct inode *inode, struct file *file)
+{
+	file->private_data = inode->i_private;
+	return 0;
+}
+
+static ssize_t msmsdcc_prealloc_write(struct file *file, const char __user *ubuf,
+		       size_t count, loff_t *ppos)
+{
+	sscanf(ubuf, "%u", &prealloc_size);
+	if (prealloc_size > 10 * 1024 * 1024)
+		prealloc_size = 10 * 1024 * 1024; 
+	return count;
+}
+
+static ssize_t msmsdcc_prealloc_read(struct file *filp, char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char buf[200];
+	int i;
+
+	i = sprintf(buf, "%u", prealloc_size);
+	return simple_read_from_buffer(ubuf, count, ppos, buf, i);
+}
+
+static const struct file_operations msmsdcc_prealloc_ops = {
+	.open	= msmsdcc_prealloc_open,
+	.write	= msmsdcc_prealloc_write,
+	.read	= msmsdcc_prealloc_read,
+};
+
 static int __init msmsdcc_dbg_init(void)
 {
 	int err;
@@ -7068,6 +7106,9 @@ static int __init msmsdcc_dbg_init(void)
 		debugfs_dir = NULL;
 		return err;
 	}
+	debugfs_prealloc = debugfs_create_file("file_prealloc_size",
+			0644, 0, 0,
+			&msmsdcc_prealloc_ops);
 
 	return 0;
 }
