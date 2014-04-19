@@ -20,6 +20,10 @@ extern struct device *mdm_usb1_1_dev;
 extern struct device *msm_hsic_host_dev;
 #endif	
 
+#if defined(CONFIG_ARCH_APQ8064) && defined(CONFIG_USB_EHCI_MSM_HSIC)
+extern int mdm_is_in_restart;
+#endif 
+
 static int rpm_resume(struct device *dev, int rpmflags);
 static int rpm_suspend(struct device *dev, int rpmflags);
 
@@ -147,7 +151,7 @@ static int rpm_idle(struct device *dev, int rpmflags)
 	
 	
 	#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-	if (msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+	if (msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 		dev_info(dev,"%s: rpm_check_suspend_allowed return %d\n", __func__, retval);
 	}
 	#endif	
@@ -324,7 +328,7 @@ static int rpm_suspend(struct device *dev, int rpmflags)
 			    dev->power.timer_expires, expires))) {
 			    
 #ifdef HTC_PM_DBG
-#ifdef CONFIG_ARCH_APQ8064				
+#if defined(CONFIG_ARCH_APQ8064) && defined(CONFIG_USB_EHCI_MSM_HSIC)
 				struct usb_device *udev = NULL;
 				extern struct usb_device *mdm_usb1_1_usbdev;
 				extern struct device *mdm_usb1_1_dev;
@@ -656,10 +660,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 		dev_info(dev, "%s[%d] rpmflags=[0x%x], runtime_error=[%d], disable_depth=[%d], timer_autosuspends=[%d], runtime_status=[%d], irq_safe=[%d]\n", __func__, __LINE__,
 		rpmflags, dev->power.runtime_error, dev->power.disable_depth, dev->power.timer_autosuspends, dev->power.runtime_status, dev->power.irq_safe);
 
-
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint = 1;
-#endif
 	trace_rpm_resume(dev, rpmflags);
 
  repeat:
@@ -682,37 +682,19 @@ static int rpm_resume(struct device *dev, int rpmflags)
 	if (dev->power.runtime_status == RPM_RESUMING
 	    || dev->power.runtime_status == RPM_SUSPENDING) {
 		DEFINE_WAIT(wait);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_rpm_resume_footprint2 = 1;
-#endif
 		if (rpmflags & (RPM_ASYNC | RPM_NOWAIT)) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 2;
-#endif
 			if (dev->power.runtime_status == RPM_SUSPENDING) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint2 = 3;
-#endif
 				dev->power.deferred_resume = true;
 			} else {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint2 = 4;
-#endif
 				retval = -EINPROGRESS;
 			}
 			goto out;
 		}
 
 		if (dev->power.irq_safe) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 5;
-#endif
 			if ( log_enable == 1 )
 				dev_info(dev, "%s[%d] spin_unlock\n", __func__, __LINE__);
 			spin_unlock(&dev->power.lock);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 6;
-#endif
 			cpu_relax();
 
 			if ( log_enable == 1 )
@@ -720,9 +702,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 			spin_lock(&dev->power.lock);
 			if ( log_enable == 1 )
 				dev_info(dev, "%s[%d] spin_lock-\n", __func__, __LINE__);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 7;
-#endif
 			goto repeat;
 		}
 
@@ -736,22 +715,13 @@ static int rpm_resume(struct device *dev, int rpmflags)
 				dev_info(dev, "%s[%d] prepare_to_wait-\n", __func__, __LINE__);
 			if (dev->power.runtime_status != RPM_RESUMING
 			    && dev->power.runtime_status != RPM_SUSPENDING) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint2 = 8;
-#endif
 				break;
 			}
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 9;
-#endif
 			if ( log_enable == 1 )
 				dev_info(dev, "%s[%d] spin_unlock_irq\n", __func__, __LINE__);
 			spin_unlock_irq(&dev->power.lock);
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 10;
-#endif
 
 			
 			
@@ -778,9 +748,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 			spin_lock_irq(&dev->power.lock);
 			if ( log_enable == 1 )
 				dev_info(dev, "%s[%d] spin_lock_irq-\n", __func__, __LINE__);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 11;
-#endif
 		}
 		if ( log_enable == 1 )
 			dev_info(dev, "%s[%d] finish_wait+\n", __func__, __LINE__);
@@ -789,9 +756,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 			dev_info(dev, "%s[%d] finish_wait-\n", __func__, __LINE__);
 		goto repeat;
 	}
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 12;
-#endif
 	if ( log_enable == 1 )
 		dev_info(dev, "%s[%d] no_callbacks=[0x%x], parent=[0x%x], dev->parent=[0x%x]\n", __func__, __LINE__,
 		dev->power.no_callbacks, (uint)parent, (uint)dev->parent);
@@ -819,9 +783,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 			if ( log_enable == 1 )
 				dev_info(dev, "%s[%d] spin_unlock\n", __func__, __LINE__);
 			spin_unlock(&dev->parent->power.lock);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 13;
-#endif
 			goto no_callback;	
 		}
 		if ( log_enable == 1 )
@@ -829,25 +790,21 @@ static int rpm_resume(struct device *dev, int rpmflags)
 		spin_unlock(&dev->parent->power.lock);
 	}
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint = 2;
-#endif
 	
 	if (rpmflags & RPM_ASYNC) {
 		dev->power.request = RPM_REQ_RESUME;
 		if (!dev->power.request_pending) {
 			dev->power.request_pending = true;
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint = 3;
-#endif
 
 			if (!strncmp(dev_name(dev), "msm_hsic_host", 13)) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint = 4;
-				dev->power.runtime_pm_runtime_work_footprint = 0;
-#endif
+				
+				
+				#if defined(CONFIG_USB_EHCI_MSM_HSIC)
 				if (dev && dev->power.htc_hsic_dbg_enable)
 					pr_info("%s: RT PM work. %s(0x%x) \n", __FUNCTION__, dev_name(dev), (unsigned int)dev);
+				#endif	
+				
+				
 
 				
 				#if defined(CONFIG_USB_EHCI_MSM_HSIC)
@@ -858,36 +815,18 @@ static int rpm_resume(struct device *dev, int rpmflags)
 				
 
 				queue_work(pm_rt_wq, &dev->power.work);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint = 5;
-#endif
 			} else {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint = 6;
-#endif
 				queue_work(pm_wq, &dev->power.work);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint = 7;
-#endif
 			}
 		}
 		retval = 0;
 		goto out;
 	}
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 14;
-#endif
 	if (!parent && dev->parent) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_rpm_resume_footprint2 = 15;
-#endif
 		parent = dev->parent;
 		if (dev->power.irq_safe)
 			goto skip_parent;
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_rpm_resume_footprint2 = 16;
-#endif
 		if ( log_enable == 1 )
 			dev_info(dev, "%s[%d] spin_unlock\n", __func__, __LINE__);
 		spin_unlock(&dev->power.lock);
@@ -903,14 +842,8 @@ static int rpm_resume(struct device *dev, int rpmflags)
 		spin_lock(&parent->power.lock);
 		if ( log_enable == 1 )
 			dev_info(dev, "%s[%d] spin_lock-\n", __func__, __LINE__);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_rpm_resume_footprint2 = 17;
-#endif
 		if (!parent->power.disable_depth
 		    && !parent->power.ignore_children) {
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-			dev->power.runtime_rpm_resume_footprint2 = 18;
-#endif
 			if ( log_enable == 1 )
 				dev_info(dev, "%s[%d] rpm_resume+\n", __func__, __LINE__);
 			rpm_resume(parent, 0);
@@ -918,17 +851,11 @@ static int rpm_resume(struct device *dev, int rpmflags)
 				dev_info(dev, "%s[%d] rpm_resume-\n", __func__, __LINE__);
 			if (parent->power.runtime_status != RPM_ACTIVE)
 				retval = -EBUSY;
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-				dev->power.runtime_rpm_resume_footprint2 = 19;
-#endif
 		}
 		if ( log_enable == 1 )
 			dev_info(dev, "%s[%d] spin_unlock\n", __func__, __LINE__);
 		spin_unlock(&parent->power.lock);
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_rpm_resume_footprint2 = 20;
-#endif
 		if ( log_enable == 1 )
 			dev_info(dev, "%s[%d] spin_lock+\n", __func__, __LINE__);
 		spin_lock(&dev->power.lock);
@@ -941,9 +868,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 	}
  skip_parent:
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 21;
-#endif
 	if (dev->power.no_callbacks)
 		goto no_callback;	
 
@@ -975,10 +899,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 	if (!callback && dev->driver && dev->driver->pm)
 		callback = dev->driver->pm->runtime_resume;
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 22;
-#endif
-
 	retval = rpm_callback(callback, dev);
 
 	
@@ -990,9 +910,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 	
 	
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 23;
-#endif
 	if (retval) {
 		
 		
@@ -1031,17 +948,11 @@ static int rpm_resume(struct device *dev, int rpmflags)
 		
 		
 	}
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 24;
-#endif
 	if ( log_enable == 1 )
 		dev_info(dev, "%s[%d] wake_up_all+\n", __func__, __LINE__);
 	wake_up_all(&dev->power.wait_queue);
 	if ( log_enable == 1 )
 		dev_info(dev, "%s[%d] wake_up_all-\n", __func__, __LINE__);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint2 = 25;
-#endif
 	if (!retval) {
 		if ( log_enable == 1 )
 			dev_info(dev, "%s[%d] rpm_idle+\n", __func__, __LINE__);
@@ -1070,9 +981,6 @@ static int rpm_resume(struct device *dev, int rpmflags)
 	}
 
 	trace_rpm_return_int(dev, _THIS_IP_, retval);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_rpm_resume_footprint = 8;
-#endif
 	return retval;
 }
 
@@ -1095,14 +1003,8 @@ static void pm_runtime_work(struct work_struct *work)
 	spin_lock_irq(&dev->power.lock);
 	if ( log_enable == 1 )
 		dev_info(dev, "%s[%d] spin_lock_irq+\n", __func__, __LINE__);
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_pm_runtime_work_footprint = 2;
-#endif
 	if (!dev->power.request_pending)
 		goto out;
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-	dev->power.runtime_pm_runtime_work_footprint = 3;
-#endif
 	req = dev->power.request;
 	dev->power.request = RPM_REQ_NONE;
 	dev->power.request_pending = false;
@@ -1172,11 +1074,6 @@ static void pm_runtime_work(struct work_struct *work)
 		
 		break;
 	case RPM_REQ_RESUME:
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_pm_runtime_work_footprint = 4;
-		dev->power.runtime_rpm_resume_footprint2 = 0;
-#endif
-
 		
 		
 		#if defined(CONFIG_USB_EHCI_MSM_HSIC)
@@ -1194,9 +1091,6 @@ static void pm_runtime_work(struct work_struct *work)
 		#endif	
 		
 		
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_M7_UL) || defined(CONFIG_MACH_DUMMY)
-		dev->power.runtime_pm_runtime_work_footprint = 5;
-#endif
 		break;
 	}
 
@@ -1289,7 +1183,7 @@ int __pm_runtime_idle(struct device *dev, int rpmflags)
 			
 			
 			#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-			if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+			if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 				dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 					atomic_read(&dev->power.usage_count));
 			}
@@ -1303,7 +1197,7 @@ int __pm_runtime_idle(struct device *dev, int rpmflags)
 		
 		
 		#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-		if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+		if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 			dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 				atomic_read(&dev->power.usage_count));
 		}
@@ -1332,7 +1226,7 @@ int __pm_runtime_suspend(struct device *dev, int rpmflags)
 			
 			
 			#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-			if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+			if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 				dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 					atomic_read(&dev->power.usage_count));
 			}
@@ -1345,7 +1239,7 @@ int __pm_runtime_suspend(struct device *dev, int rpmflags)
 		
 		
 		#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-		if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+		if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 			dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 				atomic_read(&dev->power.usage_count));
 		}
@@ -1387,7 +1281,7 @@ int __pm_runtime_resume(struct device *dev, int rpmflags)
 		
 		
 		#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-		if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+		if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 			dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 				atomic_read(&dev->power.usage_count));
 		}
@@ -1612,7 +1506,7 @@ void pm_runtime_forbid(struct device *dev)
 	
 	
 	#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-	if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+	if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 		dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 			atomic_read(&dev->power.usage_count));
 	}
@@ -1640,7 +1534,7 @@ void pm_runtime_allow(struct device *dev)
 	
 	
 	#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-	if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+	if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 		dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 			atomic_read(&dev->power.usage_count));
 	}
@@ -1687,7 +1581,7 @@ static void update_autosuspend(struct device *dev, int old_delay, int old_use)
 			
 			
 			#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-			if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+			if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 				dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 					atomic_read(&dev->power.usage_count));
 			}
@@ -1709,7 +1603,7 @@ static void update_autosuspend(struct device *dev, int old_delay, int old_use)
 			
 			
 			#if defined(CONFIG_USB_EHCI_MSM_HSIC)
-			if (dev && msm_hsic_host_dev == dev && (get_radio_flag() & 0x0001)) {
+			if (dev && msm_hsic_host_dev == dev && (mdm_is_in_restart || (get_radio_flag() & 0x0001))) {
 				dev_info(dev, "%s[%d] usage_count[%d]\n", __func__, __LINE__,
 					atomic_read(&dev->power.usage_count));
 			}

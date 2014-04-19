@@ -19,7 +19,7 @@
 #include <linux/gpio.h>
 #include <linux/coresight.h>
 #include <asm/clkdev.h>
-#include <linux/msm_kgsl.h>
+#include <mach/kgsl.h>
 #include <linux/android_pmem.h>
 #include <mach/irqs-8960.h>
 #include <mach/dma.h>
@@ -2233,8 +2233,13 @@ struct platform_device msm8960_cpudai_slimbus_2_tx = {
 };
 
 struct msm_mi2s_pdata mi2s_data = {
+#ifdef CONFIG_MACH_ZIP_CL_MI2S_DATA_SWITCH
+	.rx_sd_lines = MSM_MI2S_SD3 ,   
+	.tx_sd_lines = MSM_MI2S_SD0 ,   
+#else
 	.rx_sd_lines = MSM_MI2S_SD0 ,   
 	.tx_sd_lines = MSM_MI2S_SD3 ,   
+#endif
 };
 
 struct platform_device msm_cpudai_mi2s = {
@@ -2299,11 +2304,19 @@ struct msm_dai_auxpcm_pdata auxpcm_pdata = {
 	.mode_16k = {
 		.mode = AFE_PCM_CFG_MODE_PCM,
 		.sync = AFE_PCM_CFG_SYNC_INT,
+#ifdef CONFIG_BT_WBS_BRCM
+		.frame = AFE_PCM_CFG_FRM_128BPF,
+#else
 		.frame = AFE_PCM_CFG_FRM_256BPF,
+#endif
 		.quant = AFE_PCM_CFG_QUANT_LINEAR_NOPAD,
 		.slot = 0,
 		.data = AFE_PCM_CFG_CDATAOE_MASTER,
+#ifdef CONFIG_BT_WBS_BRCM
+		.pcm_clk_rate = 2048000,
+#else
 		.pcm_clk_rate = 4096000,
+#endif
 	}
 };
 

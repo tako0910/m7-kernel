@@ -450,7 +450,7 @@ static ssize_t hdmi_common_rda_edid_3d_modes(struct device *dev,
 			.disp_3d_mode_list;
 		for (i = 0; i < external_common_state->disp_mode_list
 			.num_of_elements; ++i) {
-			video_3d_format_2string(*video_3d_mode++, buff_3d, sizeof(buff_3d));
+			video_3d_format_2string(*video_3d_mode++, buff_3d);
 			if (ret > 0)
 				ret += snprintf(buf+ret, PAGE_SIZE-ret,
 					",%d=%s",
@@ -1454,70 +1454,34 @@ const char *single_video_3d_format_2string(uint32 format)
 	return "";
 }
 
-ssize_t video_3d_format_2string(uint32 format, char *buf, int size)
+ssize_t video_3d_format_2string(uint32 format, char *buf)
 {
-	ssize_t ret = 0, len = 0;
-
-	if (size <= strlen(single_video_3d_format_2string(
-		format & TOP_AND_BOTTOM)))
-		goto l_err;
-
-	ret = snprintf(buf, size, "%s",
+	ssize_t ret, len = 0;
+	ret = snprintf(buf, PAGE_SIZE, "%s",
 		single_video_3d_format_2string(format & FRAME_PACKING));
-	if (ret < 0)
-		goto l_err;
 	len += ret;
 
-	if (len && (format & TOP_AND_BOTTOM)) {
-		if (size - len - 1 <= strlen(single_video_3d_format_2string(
-			format & TOP_AND_BOTTOM)))
-			goto l_err;
-		ret = snprintf(buf + len, size - len, ":%s",
+	if (len && (format & TOP_AND_BOTTOM))
+		ret = snprintf(buf + len, PAGE_SIZE, ":%s",
 			single_video_3d_format_2string(
 				format & TOP_AND_BOTTOM));
-		if (ret < 0)
-			goto l_err;
-	} else {
-		if (size - len <= strlen(single_video_3d_format_2string(
-			format & TOP_AND_BOTTOM)))
-			goto l_err;
-		ret = snprintf(buf + len, size - len, "%s",
+	else
+		ret = snprintf(buf + len, PAGE_SIZE, "%s",
 			single_video_3d_format_2string(
 				format & TOP_AND_BOTTOM));
-		if (ret < 0)
-			goto l_err;
-	}
-
 	len += ret;
 
-	if (len && (format & SIDE_BY_SIDE_HALF)) {
-		if (size - len - 1 <= strlen(single_video_3d_format_2string(
-			format & SIDE_BY_SIDE_HALF)))
-			goto l_err;
-		ret = snprintf(buf + len, size - len, ":%s",
+	if (len && (format & SIDE_BY_SIDE_HALF))
+		ret = snprintf(buf + len, PAGE_SIZE, ":%s",
 			single_video_3d_format_2string(
 				format & SIDE_BY_SIDE_HALF));
-		if (ret < 0)
-			goto l_err;
-	} else {
-		if (size - len <= strlen(single_video_3d_format_2string(
-			format & SIDE_BY_SIDE_HALF)))
-			goto l_err;
-		ret = snprintf(buf + len, size - len, "%s",
+	else
+		ret = snprintf(buf + len, PAGE_SIZE, "%s",
 			single_video_3d_format_2string(
 				format & SIDE_BY_SIDE_HALF));
-		if (ret < 0)
-			goto l_err;
-	}
-
 	len += ret;
 
 	return len;
-l_err:
-	DEV_ERR("EDID[3D]: buffer size %d too short(len = %d), or wrong \
-		return value %d of snprintf\n",
-		size, len, ret);
-	return -EINVAL;
 }
 
 static void add_supported_3d_format(
@@ -1536,7 +1500,7 @@ static void add_supported_3d_format(
 			break;
 		}
 	}
-	video_3d_format_2string(video_3d_format, string, sizeof(string));
+	video_3d_format_2string(video_3d_format, string);
 	DEV_DBG("EDID[3D]: format: %d [%s], %s %s\n",
 		video_format, video_format_2string(video_format),
 		string, added ? "added" : "NOT added");

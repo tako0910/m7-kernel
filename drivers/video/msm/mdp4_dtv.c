@@ -121,6 +121,9 @@ static int dtv_on(struct platform_device *pdev)
 	int ret = 0;
 	struct msm_fb_data_type *mfd;
 	unsigned long panel_pixclock_freq , pm_qos_rate;
+#ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL_HDCP_SUPPORT
+	int timeout = 100;
+#endif
 
 	mfd = platform_get_drvdata(pdev);
 	panel_pixclock_freq = mfd->fbi->var.pixclock;
@@ -160,9 +163,16 @@ static int dtv_on(struct platform_device *pdev)
 	pr_info("%s: tv_src_clk=%dkHz, pm_qos_rate=%ldkHz, [%d]\n", __func__,
 		mfd->fbi->var.pixclock/1000, pm_qos_rate, ret);
 	mfd->panel_info.clk_rate = mfd->fbi->var.pixclock;
+
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL_HDCP_SUPPORT
-	while(atomic_read(&read_an_complete))
-		msleep(1);
+	while(atomic_read(&read_an_complete) && timeout--)
+		msleep(10);
+
+	if(timeout < 0)
+		pr_err("%s: unlikely timeout!\n", __func__);
+	else
+		pr_info("%s: waiting AN read for %d ms\n",
+			__func__, (100-timeout)*10);
 #endif
 	clk_prepare_enable(hdmi_clk);
 	clk_reset(hdmi_clk, CLK_RESET_ASSERT);

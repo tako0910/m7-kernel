@@ -877,6 +877,8 @@ static int mmc_blk_cmd_recovery(struct mmc_card *card, struct request *req,
 
 	
 	if (err) {
+		if(mmc_card_sd(card))
+			card->host->detect_change = 1;
 		
 		if (mmc_detect_card_removed(card->host))
 			return ERR_NOMEDIUM;
@@ -1031,9 +1033,6 @@ retry:
 		goto out;
 
 
-	if (mmc_can_sanitize(card))
-		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
-				 EXT_CSD_SANITIZE_START, 1, 0);
 out_retry:
 	if (err && !mmc_blk_reset(md, card->host, type))
 		goto retry;
@@ -2193,7 +2192,7 @@ static int sd_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 				break;
 			
 			try_recovery++;
-			if (try_recovery < 2 && card->do_remove == 0) {
+			if (try_recovery <= 3 && card->do_remove == 0) {
 				do_reinit = 1;
 				goto recovery;
 			} else {
@@ -2207,7 +2206,7 @@ static int sd_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 			err = mmc_blk_reset(md, card->host, type);
 			
 			try_recovery++;
-			if (try_recovery < 2 && card->do_remove == 0) {
+			if (try_recovery <= 3 && card->do_remove == 0) {
 				do_reinit = 1;
 				goto recovery;
 			} else {
@@ -2225,7 +2224,7 @@ static int sd_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 			}
 			
 			try_recovery++;
-			if (try_recovery < 2 && card->do_remove == 0) {
+			if (try_recovery <= 3 && card->do_remove == 0) {
 				do_reinit = 1;
 				goto recovery;
 			} else {

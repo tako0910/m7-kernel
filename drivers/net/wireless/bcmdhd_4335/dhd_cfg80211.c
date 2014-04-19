@@ -403,12 +403,14 @@ wl_cfg80211_bt_setflag(struct net_device *dev, bool set)
 #if defined(BT_DHCP_USE_FLAGS)
 	WL_TRACE(("WI-FI priority boost via bt flags, set:%d\n", set));
 	if (set == TRUE) {
+        printf("set btc_mode = 0\n");
 		
 		dev_wlc_bufvar_set(dev, "btc_flags",
 			(char *)&buf_flag7_dhcp_on[0],
 			sizeof(buf_flag7_dhcp_on));
 		wldev_iovar_setint(dev, "btc_mode", bt_coex);
 	} else {
+        printf("set btc_mode = 1\n");
 		
 		dev_wlc_bufvar_set(dev, "btc_flags",
 			(char *)&buf_flag7_default[0],
