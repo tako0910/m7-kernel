@@ -20,6 +20,8 @@
 #include <linux/mmc/pm.h>
 #include <linux/android_alarm.h>
 
+#define MMC_STATS_INTERVAL 5000 
+#define MMC_STATS_LOG_INTERVAL 60000 
 #define SD_DEBOUNCE_DEBUG	1
 struct mmc_ios {
 	unsigned int	clock;			
@@ -139,6 +141,10 @@ struct mmc_host {
 	struct notifier_block	pm_notify;
 	int					tp_enable;
 	int					burst_mode;
+#define MMC_DEBUG_MEMORY			0x01
+#define MMC_DEBUG_FREE_SPACE		0x02
+#define MMC_DEBUG_RANDOM_RW			0x04
+	unsigned int		debug_mask;
 
 #define MMC_VDD_165_195		0x00000080	
 #define MMC_VDD_20_21		0x00000100	
@@ -266,6 +272,8 @@ struct mmc_host {
 
 	struct delayed_work	detect;
 	struct delayed_work	remove;
+	struct delayed_work	stats_work;
+	unsigned int		redetect_cnt;
 	struct wake_lock	detect_wake_lock;
 	int			detect_change;	
 	struct mmc_hotplug	hotplug;
@@ -320,9 +328,17 @@ struct mmc_host {
 		unsigned long wcount;	
 		ktime_t rtime_drv;	   
 		ktime_t wtime_drv;	   
+		unsigned long rbytes_drv_rand;  
+		unsigned long wbytes_drv_rand;  
+		unsigned long rcount_rand;	
+		unsigned long wcount_rand;	
+		ktime_t rtime_drv_rand;	   
+		ktime_t wtime_drv_rand;	   
+		unsigned long wbytes_low_perf;
+		unsigned long  wtime_low_perf;
+		unsigned long lp_duration;	
 		ktime_t start;
 	} perf;
-	struct timer_list stats_timer;
 	bool perf_enable;
 
 	struct mmc_ios saved_ios;

@@ -58,6 +58,7 @@
 #include <asm/unistd.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
+#include <htc_debug/stability/htc_process_debug.h>
 
 static void exit_mm(struct task_struct * tsk);
 
@@ -219,13 +220,26 @@ static bool has_stopped_jobs(struct pid *pgrp)
 	struct task_struct *p;
 
 	do_each_pid_task(pgrp, PIDTYPE_PGID, p) {
-		if (p->signal->flags & SIGNAL_STOP_STOPPED) {
-			printk(KERN_INFO "%s: %s(%d) is stopped\n", __func__, p->comm, p->pid);
+		if (p->signal->flags & SIGNAL_STOP_STOPPED)
 			return true;
-		}
 	} while_each_pid_task(pgrp, PIDTYPE_PGID, p);
 
 	return false;
+}
+
+static bool is_in_zygote_pgrp(struct task_struct *tsk){
+        struct pid *pgrp = task_pgrp(tsk);
+        struct task_struct *p;
+
+        for_each_process(p){
+                if(!strncmp("zygote",p->comm,6)){
+                        if(pgrp == task_pgrp(p))
+                                return 1;
+                        else
+                                return 0;
+                }
+        }
+        return 0;
 }
 
 static void
@@ -242,7 +256,8 @@ kill_orphaned_pgrp(struct task_struct *tsk, struct task_struct *parent)
 	if (task_pgrp(parent) != pgrp &&
 	    task_session(parent) == task_session(tsk) &&
 	    will_become_orphaned_pgrp(pgrp, ignored_task) &&
-	    has_stopped_jobs(pgrp)) {
+	    has_stopped_jobs(pgrp) &&
+	    (!is_in_zygote_pgrp(tsk))) {
 		__kill_pgrp_info(SIGHUP, SEND_SIG_PRIV, pgrp);
 		__kill_pgrp_info(SIGCONT, SEND_SIG_PRIV, pgrp);
 	}
@@ -852,7 +867,9 @@ do_group_exit(int exit_code)
 	struct signal_struct *sig = current->signal;
 
 	BUG_ON(exit_code & 0x80); 
-
+#ifdef CONFIG_HTC_PROCESS_DEBUG
+	do_group_exit_debug_dump(exit_code);
+#endif
 	if (signal_group_exit(sig))
 		exit_code = sig->group_exit_code;
 	else if (!thread_group_empty(current)) {

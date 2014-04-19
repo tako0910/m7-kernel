@@ -951,11 +951,13 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		
 		if (card->cid.manfid == SAMSUNG_MMC) {
 			card->bkops_check_status = 1;
-			if (!strcmp(card->cid.prod_name, "MBG4GA"))
+			pr_info("%s: set bkops_check_status\n", mmc_hostname(card->host));
+			if (!strcmp(card->cid.prod_name, "MBG4GA")) {
 				perf_degr = 1;
-			if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_SANITIZE)
-				card->need_sanitize = 1;
-			pr_info("%s: set bkops_check_status & need_sanitize\n", mmc_hostname(card->host));
+				if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_SANITIZE)
+					card->need_sanitize = 1;
+				pr_info("%s: set need_sanitize\n", mmc_hostname(card->host));
+			}
 		}
 	} else if (card->cid.manfid == SANDISK_MMC) {
 		
