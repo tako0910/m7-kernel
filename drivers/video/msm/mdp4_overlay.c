@@ -3021,10 +3021,13 @@ int mdp4_overlay_mdp_perf_req(struct msm_fb_data_type *mfd)
 	for (i = 0; i < MDP4_MIXER_MAX; i++)
 		perf_req->use_ov_blt[i] = 0;
 
+	mdp_clk_ctrl(1);
 	for (i = 0; i < OVERLAY_PIPE_MAX; i++, pipe++) {
 
-		if (!pipe)
+		if (!pipe) {
+			mdp_clk_ctrl(0);
 			return ret;
+		}
 
 		if (!pipe->pipe_used)
 			continue;
@@ -3098,6 +3101,7 @@ int mdp4_overlay_mdp_perf_req(struct msm_fb_data_type *mfd)
 			}
 		}
 	}
+	mdp_clk_ctrl(0);
 
 	ib_quota_total = max(ib_quota_total, ib_quota_min);
 

@@ -3939,7 +3939,7 @@ static void pj_pogo_detect_worker(struct work_struct *work)
 		pj_vol = get_prop_pj_uvolts(the_chip)/1000;
 		pr_info("%s: pj_vol=%d\n", __func__, pj_vol);
 
-		if (pj_vol_err == 0 && pj_in == 1 && pj_vol < 2400) {
+		if (pj_vol_err == 0 && pj_in == 1) {
 			pj_vol_err++;
 			err = pm8921_set_pj_chg_control(0, 1); 
 			if (err) {
@@ -3959,7 +3959,6 @@ static void pj_pogo_detect_worker(struct work_struct *work)
 			if (is_pj_in ^ pj_in || first) {
 				if (pj_in) {
 					is_batt_full = false;
-					pj_chg_full = PJ_NOT_FULL;
 					eoc_count = eoc_count_by_curr = 0;
 					
 					if ((is_usb_chg_plugged_in(the_chip)
@@ -3971,10 +3970,12 @@ static void pj_pogo_detect_worker(struct work_struct *work)
 					htc_charger_event_notify(HTC_CHARGER_EVENT_POWER_JACKET_IN);
 				} else {
 					pm8921_pj_mpp_unconfig(); 
-					pj_chg_full = PJ_NOT_FULL;
 					htc_charger_event_notify(HTC_CHARGER_EVENT_POWER_JACKET_OUT);
 				}
 				is_pj_in = pj_in;
+				pj_chg_full = PJ_NOT_FULL;
+				if(delayed_work_pending(&the_chip->pj_full_detect_work))
+					cancel_delayed_work(&the_chip->pj_full_detect_work);
 			}
 			first = 0;
 			pj_detect_times = 0;
@@ -5179,8 +5180,6 @@ static void pj_full_detect_worker(struct work_struct *work)
 	pj_chg_stat = pm8921_get_pj_chg_control();
 	pj_vol = get_prop_pj_uvolts(the_chip)/1000;
 
-	pr_info("%s:ori: pj_chg_full:%d, pj_chg_status:%d\n",
-		__func__, pj_chg_full, pj_chg_stat);
 	if (pj_chg_full == PJ_NOT_FULL) {
 		pr_info("%s:Read voltage: %d. Start detect PJ voltage after 10 minutes.",
 			__func__, pj_vol);
@@ -5190,6 +5189,7 @@ static void pj_full_detect_worker(struct work_struct *work)
 			msecs_to_jiffies(600000));
 	} else if (pj_chg_full == PJ_FULL_DETECT) {
 		
+		pr_info("%s:Set PJ_OFF 30s to read voltage.\n", __func__);
 		err = pm8921_set_pj_chg_control(0, 0);
 		if (err) {
 			pr_info("%s: set PJ_OFF fail (%d).\n", __func__, err);
@@ -5209,6 +5209,9 @@ static void pj_full_detect_worker(struct work_struct *work)
 				pj_chg_full = PJ_FULL;
 				pj_full_detect_counter = 0;
 			} else {
+				pr_info("%s: pj voltage %dmV not meet full criteria (%d), "
+					"pj_full_detect_counter:%d\n", __func__, pj_vol,
+					the_chip->pj_full_vol, pj_full_detect_counter);
 				pj_full_detect_counter++;
 				if (pj_full_detect_counter == 15) {
 					pj_chg_full = PJ_FULL;
@@ -5221,9 +5224,10 @@ static void pj_full_detect_worker(struct work_struct *work)
 				}
 			}
 		} else {
-			pr_info("%s: not PJ_CHG_STATUS_OFF state, pj_chg_stat: %d.\n",
-				__func__, pj_chg_stat);
-			pj_chg_full = PJ_NOT_FULL;
+			pr_info("%s: not PJ_CHG_STATUS_OFF state, pj_chg_stat: %d, "
+				"re-read again.\n", __func__, pj_chg_stat);
+			pj_chg_full = PJ_FULL_DETECT;
+			schedule_delayed_work(&the_chip->pj_full_detect_work,0);
 		}
 	}
 #if 0 
@@ -5234,8 +5238,6 @@ static void pj_full_detect_worker(struct work_struct *work)
 			pr_info("%s: set PJ_CHG fail (%d).\n", __func__, err);
 	}
 #endif
-	pr_info("%s:end: pj_chg_full:%d, pj_vol:%d, pj_full_detect_counter:%d\n",
-		__func__, pj_chg_full, pj_vol, pj_full_detect_counter);
 }
 
 #define CONSECUTIVE_COUNT	3
@@ -5259,6 +5261,8 @@ static void eoc_worker(struct work_struct *work)
 				__func__, pm_chg_get_rt_status(chip, FASTCHG_IRQ));
 		is_batt_full = false;
 		pj_chg_full = PJ_NOT_FULL;
+		if(the_chip->pj_in_irq && delayed_work_pending(&the_chip->pj_full_detect_work))
+			cancel_delayed_work(&the_chip->pj_full_detect_work);
 		eoc_count = eoc_count_by_curr = 0;
 		is_ac_safety_timeout_twice = false;
 		if (!flag_disable_wakelock)
