@@ -143,8 +143,8 @@ static void mdp4_dsi_cmd_blt_dmap_update(struct mdp4_overlay_pipe *pipe)
 	MDP_OUTP(MDP_BASE + 0x90008, addr);
 }
 
-static int mdp4_dsi_cmd_wait4dmap(int cndx);
-static int mdp4_dsi_cmd_wait4ov(int cndx);
+static void mdp4_dsi_cmd_wait4dmap(int cndx);
+static void mdp4_dsi_cmd_wait4ov(int cndx);
 
 static void mdp4_dsi_cmd_do_blt(struct msm_fb_data_type *mfd, int enable)
 {
@@ -261,23 +261,6 @@ static void mdp4_dsi_cmd_pipe_clean(struct vsync_update *vp)
 static void mdp4_dsi_cmd_blt_ov_update(struct mdp4_overlay_pipe *pipe);
 static int mdp4_dsi_cmd_clk_check(struct vsycn_ctrl *vctrl);
 
-bool mdp_hang = false;
-void reset_mdp(void)
-{
-	struct vsycn_ctrl *vctrl;
-	pr_err("[%s] +\n", __func__);
-	vctrl = &vsync_ctrl_db[0];
-
-	mdp4_hw_init();
-	vsync_irq_disable(INTR_PRIMARY_RDPTR, MDP_PRIM_RDPTR_TERM);
-	vctrl->clk_enabled = 0;
-	vctrl->clk_control = 0;
-	mipi_dsi_clk_cfg(0);
-	mdp_clk_ctrl(0);
-
-	pr_err("[%s] -\n", __func__);
-}
-
 int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 {
 	int  i, undx;
@@ -352,18 +335,12 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 
 	if (need_dmap_wait) {
 		pr_debug("%s: wait4dmap\n", __func__);
-		if (mdp4_dsi_cmd_wait4dmap(0)) {
-			mdp_hang = true;
-			return cnt;
-		}
+		mdp4_dsi_cmd_wait4dmap(0);
 	}
 
 	if (need_ov_wait) {
 		pr_debug("%s: wait4ov\n", __func__);
-		if (mdp4_dsi_cmd_wait4ov(0)) {
-			mdp_hang = true;
-			return cnt;
-		}
+		mdp4_dsi_cmd_wait4ov(0);
 	}
 
 	if (pipe->ov_blt_addr) {
@@ -453,17 +430,18 @@ void mdp4_dsi_cmd_vsync_ctrl(struct fb_info *info, int enable)
 		spin_lock_irqsave(&vctrl->spin_lock, flags);
 		vctrl->clk_control = 0;
 		vctrl->expire_tick = 0;
-		spin_unlock_irqrestore(&vctrl->spin_lock, flags);
 		if (vctrl->clk_enabled == 0) {
 			pr_debug("%s: SET_CLK_ON\n", __func__);
-			mipi_dsi_clk_cfg(1);
-			mdp_clk_ctrl(1);
 			vctrl->clk_enabled = 1;
 			clk_set_on = 1;
 			vctrl->last_vsync_ms =
 				ktime_to_ms(ktime_get()) - VSYNC_MIN_DIFF_MS;
 		}
+		spin_unlock_irqrestore(&vctrl->spin_lock, flags);
+
 		if (clk_set_on) {
+			mipi_dsi_clk_cfg(1);
+			mdp_clk_ctrl(1);
 			vsync_irq_enable(INTR_PRIMARY_RDPTR,
 						MDP_PRIM_RDPTR_TERM);
 		}
@@ -497,52 +475,38 @@ void mdp4_dsi_cmd_wait4vsync(int cndx)
 	mdp4_stat.wait4vsync0++;
 }
 
-static int mdp4_dsi_cmd_wait4dmap(int cndx)
+static void mdp4_dsi_cmd_wait4dmap(int cndx)
 {
 	struct vsycn_ctrl *vctrl;
-	int ret;
 
 	if (cndx >= MAX_CONTROLLER) {
 		pr_err("%s: out or range: cndx=%d\n", __func__, cndx);
-		return 0;
+		return;
 	}
 
 	vctrl = &vsync_ctrl_db[cndx];
 
 	if (atomic_read(&vctrl->suspend) > 0)
-		return 0;
+		return;
 
-	ret = wait_for_completion_timeout(&vctrl->dmap_comp, HZ / 5);
-	if (ret == 0) {
-		pr_err("wait4dmap timedout!\n");
-		return -1;
-	}
-
-	return 0;
+	wait_for_completion(&vctrl->dmap_comp);
 }
 
-static int mdp4_dsi_cmd_wait4ov(int cndx)
+static void mdp4_dsi_cmd_wait4ov(int cndx)
 {
 	struct vsycn_ctrl *vctrl;
-	int ret;
 
 	if (cndx >= MAX_CONTROLLER) {
 		pr_err("%s: out or range: cndx=%d\n", __func__, cndx);
-		return 0;
+		return;
 	}
 
 	vctrl = &vsync_ctrl_db[cndx];
 
 	if (atomic_read(&vctrl->suspend) > 0)
-		return 0;
+		return;
 
-	ret = wait_for_completion_timeout(&vctrl->ov_comp, HZ / 5);
-	if (ret == 0) {
-		pr_err("wait4ov timedout\n");
-		return -1;
-	}
-
-	return 0;
+	wait_for_completion(&vctrl->ov_comp);
 }
 
 

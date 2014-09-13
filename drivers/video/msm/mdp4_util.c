@@ -392,8 +392,9 @@ void mdp4_hw_init(void)
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 	mdp_clk_ctrl(1);
 
-	if (mdp_hang)
-		mdp4_sw_reset(0x17);
+#ifdef MDP4_ERROR
+	mdp4_sw_reset(0x17);
+#endif
 
 	if (mdp_rev > MDP_REV_41) {
 		
@@ -2297,8 +2298,10 @@ u32 mdp4_allocate_writeback_buf(struct msm_fb_data_type *mfd, u32 mix_num)
 	if (!IS_ERR_OR_NULL(mfd->iclient)) {
 		pr_info("%s:%d ion based allocation mfd->mem_hid 0x%x\n",
 			__func__, __LINE__, mfd->mem_hid);
+
 		buf->ihdl = ion_alloc(mfd->iclient, buffer_size, SZ_4K,
-			mfd->mem_hid);
+					(mfd->mem_hid & ~ION_SECURE), (mfd->mem_hid & ION_SECURE));
+
 		if (!IS_ERR_OR_NULL(buf->ihdl)) {
 			if (mdp_iommu_split_domain) {
 				if (ion_map_iommu(mfd->iclient, buf->ihdl,
